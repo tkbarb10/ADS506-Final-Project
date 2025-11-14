@@ -1,0 +1,28 @@
+---
+title: "Group 3 Final Report"
+authors: "Kamran Shirazi & Taylor Kirk"
+date: "2025-11-14"
+format:
+  pdf:
+    toc: true
+---
+
+```{r setup, include=FALSE}
+library(fpp3)
+library(tidyverse)
+library(gt)
+```
+
+# Introduction
+
+Words words and more words
+
+# Data Overview
+
+```{r data-overview}
+df <- read_csv("data/global_temp.csv")
+
+dim(df)
+
+str(df)
+```
