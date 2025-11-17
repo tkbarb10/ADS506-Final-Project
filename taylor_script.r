@@ -39,7 +39,8 @@ temp_data |>
 temp_data |> 
   model(STL()) |> 
   components() |> 
-  autoplot()
+  autoplot() + 
+  labs(title = "STL Decomposition of Global Monthly Temperature Anomalies")
 
 temp_data |> 
   filter(year(Date) >= 1930) |>
@@ -47,7 +48,7 @@ temp_data |>
   components() |> 
   autoplot()
 
-gg_tsdisplay(temp_data, Monthly_Anomaly, plot_type = 'partial')
+gg_tsdisplay(temp_data, Monthly_Anomaly, plot_type = 'partial') + labs(title = "ACF and PACF of Global Monthly Temperature Anomalies")
 
 features(temp_data, Monthly_Anomaly, feat_stl)
 
@@ -61,4 +62,43 @@ features(temp_data, Monthly_Anomaly, guerrero)
 # lambda is close to 1, so no power transformation needed
 
 
+features(temp_data, Monthly_Anomaly, feat_spectral)
 
+?components
+
+# --------------- EDA with full temps ---------------
+
+full_temp <- read.csv("data/converted_global_temp.csv")
+
+head(full_temp)
+
+full_temp_tsibble <- full_temp |> 
+  mutate(
+    Date = yearmonth(Date)
+  ) |> 
+  select(c(Date, actual_temp)) |> 
+  as_tsibble(index = Date)
+
+full_temp_tsibble |> 
+  autoplot(actual_temp)
+
+full_temp_tsibble |> 
+  model(STL()) |> 
+  components() |> 
+  autoplot() +
+  labs(title = "STL Decomposition of Global Monthly Actual Temperatures")
+
+full_temp_tsibble |> 
+  filter(year(Date) >= 1930) |>
+  model(STL()) |> 
+  components() |> 
+  autoplot()
+
+gg_tsdisplay(full_temp_tsibble, actual_temp, plot_type = 'partial')
+# much more clearly see the seasonal auto correlation now
+
+features(full_temp_tsibble, actual_temp, c(unitroot_kpss, unitroot_ndiffs, unitroot_nsdiffs))
+# need at least one difference and one seasonal difference
+
+features(full_temp_tsibble, actual_temp, guerrero)
+# Lamdba estimation of 1.44, so a power transformation may be helpful
