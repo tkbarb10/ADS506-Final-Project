@@ -64,8 +64,6 @@ features(temp_data, Monthly_Anomaly, guerrero)
 
 features(temp_data, Monthly_Anomaly, feat_spectral)
 
-?components
-
 # --------------- EDA with full temps ---------------
 
 full_temp <- read.csv("data/converted_global_temp.csv")
