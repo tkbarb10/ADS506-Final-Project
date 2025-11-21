@@ -10,6 +10,7 @@ format:
 ```{r setup, include=FALSE, echo=FALSE, message=FALSE, warning=FALSE}
 library(fpp3)
 library(tidyverse)
+library(knitr)
 library(gt)
 ```
 
@@ -32,7 +33,6 @@ summary(df[3:12])
 ## Convert to Tsibble and Temperatures
 
 Explain here about converting to temperatures and why
-
 
 ```{r convert-tsibble}
 
@@ -80,6 +80,14 @@ converted_df |>
 
 Notes on what we see with the components.  Constant seasonal, trend mainly flat until around 1980 then increasing, some remainder
 
+```{r gg-season}
+
+converted_df |> 
+  ggtime::gg_season() + 
+  theme_minimal()
+```
+
+Clearer picture at the increasing trend over time, occuring across all periods
 
 ```{r transformations}
 
@@ -98,3 +106,225 @@ features(converted_df, actual_temp, c(unitroot_kpss, unitroot_ndiffs, unitroot_n
 much more clearly see the seasonal auto correlation now
 
 need at least one difference and one seasonal difference
+
+# Modeling / Forecasting
+
+Using ETS, TSLM and ARIMA models on both anomalies and actual temperatures
+
+## Anomaly Modeling
+
+```{r anomaly-modeling}
+
+```
+
+## Actual Temperature Modeling
+
+```{r training-split}
+trn_data <- converted_df |>
+  filter(year(Date) < 2020)
+
+cv_trn <- trn_data |> 
+  stretch_tsibble(.init = 960, .step = 60)
+```
+
+Modeling on all temp data prior to 2020, with cross validation sets created from the first 80 years of data (1850 - 1930) and rolling forward by 5 years (60 months).  1930 is when the temperature trend begins to increase more noticeably, so this will allow us to see how well the models can adapt to that change over time.
+
+### ETS
+
+```{r actual-temperature-ets}
+
+ets_fit <- cv_trn |> 
+  model(
+    ets_auto = ETS(),
+    additive = ETS(actual_temp ~ error("A") + trend("A") + season("A")),
+    multiplicative = ETS(actual_temp ~ error("M") + trend("A") + season("M")),
+    damped = ETS(actual_temp ~ error("A") + trend("Ad") + season("A")),
+    log_auto = ETS(log(actual_temp)),
+    box_cox_auto = ETS(box_cox(actual_temp, lambda = 1.5))
+  )
+```
+
+```{r ets-training-metrics}
+
+  ets_fit |> 
+    accuracy() |> 
+    group_by(.model) |> 
+    summarise(across(.cols = c(RMSE, MAE, MAPE), .fns = mean)) |> 
+    arrange(RMSE) |> 
+    kable(digits = 2)
+
+  ets_fit |> 
+  tidy() |> 
+  group_by(.model, term) |> 
+  summarise(across(.cols = estimate, .fns = mean)) |> 
+  pivot_wider(names_from = term, values_from = estimate) |> 
+  kable(digits = 2)
+```
+
+```{r ets-forecasts}
+
+forecast_horizon <- max(yearmonth(converted_df$Date)) - max(yearmonth(trn_data$Date))
+
+ets_fc <- ets_fit |> 
+  forecast(h = forecast_horizon)
+
+ets_fc |> 
+  accuracy(converted_df) |>
+  arrange(RMSE) |> 
+  kable(digets = 2)
+```
+
+```{r ets-diagnostics}
+
+ets_fc |>
+  filter(.id %in% c(18, 19)) |>
+  autoplot() +
+  autolayer(converted_df |> filter(year(Date) > 2005), actual_temp) +
+  facet_grid(.model ~ .id) +
+  theme_minimal()
+```
+
+ETS models have a hard time capturing the seasonal peaks, much more variation around then
+
+```{r ets-residuals}
+
+ets_fit |> 
+  select(box_cox_auto) |>
+  tail(n = 1) |> 
+  gg_tsresiduals()
+```
+
+Checking just last model (trained on most data)
+
+### TSLM
+
+```{r actual-temperature-tslm}
+
+tslm_fit <- cv_trn |> 
+  model(
+    tslm_auto = TSLM(actual_temp),
+    tslm_trend = TSLM(actual_temp ~ trend()),
+    tslm_trend_season = TSLM(actual_temp ~ trend() + season()),
+    tslm_fourier = TSLM(actual_temp ~ trend() + fourier(K = 2)),
+    tslm_log = TSLM(log(actual_temp) ~ trend() + season()),
+    tslm_box_cox = TSLM(box_cox(actual_temp, lambda = 1.5) ~ trend() + season()),
+    tslm_piecewise = TSLM(actual_temp ~ trend(knots = c(1920, 1975)) + season())
+  )
+```
+
+Fourier terms for a simpler model, piecewise to capture changes in trend at those points
+
+```{r tslm-training-metrics}
+
+tslm_fit |> 
+  accuracy() |> 
+  group_by(.model) |> 
+  summarise(across(.cols = c(RMSE, MAE, MAPE), .fns = mean)) |> 
+  arrange(RMSE) |> 
+  kable(digits = 2)
+
+tslm_fit |> 
+  select(tslm_fourier) |>
+  tail(1) |>
+  report()
+
+## Full parameter table output
+# tslm_fit |> 
+#   tidy() |> 
+#   group_by(.model, term) |> 
+#   summarise(across(
+#       .cols = c(estimate, std.error, statistic, p.value),
+#       .fns = mean)
+#   ) |> 
+#   pivot_wider(
+#     names_from = term, 
+#     values_from = c(estimate, std.error, statistic, p.value)
+#   ) |> 
+#     kable(digits = 2)
+```
+
+```{r regressor-data}
+
+el_nino <- read.csv("data/el_nino_events.csv")
+
+full_temp_nino <- converted_df |> 
+  mutate(join_year = year(Date)) |> 
+  left_join(el_nino, by = c("join_year" = "Year")) |> 
+  mutate(
+    el_nino       = if_else(Phase == "El Niño", 1, 0, missing = 0),
+    la_nina       = if_else(Phase == "La Niña", 1, 0, missing = 0)
+  ) |> 
+  select(-join_year, -Phase, -Strength) |> 
+  filter(year(Date) > 1895) # this is the first year in the el nino data
+```
+
+```{r modeling-with-el_nino}
+
+cv_nino_data <- full_temp_nino |> 
+  stretch_tsibble(.init = 397, .step = 58)
+
+cv_trn_nino <- cv_nino_data |> 
+  group_by(.id) |> 
+  slice(1:(n() - 60)) |> 
+  ungroup()
+
+cv_valid <- cv_nino_data |> 
+  group_by(.id) |> 
+  slice_tail(n = 60) |> 
+  ungroup()
+
+
+nino_fit <- cv_trn_nino |> 
+  model(
+    tslm_nino = TSLM(actual_temp ~ trend() + season() + el_nino + la_nina)
+  )
+
+nino_fit |> 
+  accuracy() |> 
+  group_by(.model) |>
+  summarise(across(.cols = c(RMSE, MAE, MAPE), .fns = mean)) |> 
+  arrange(RMSE) |> 
+  kable(digits = 2)
+
+nino_fit |> 
+  select(tslm_nino) |>
+  tail(n = 1) |> 
+  report()
+```
+
+```{r even-comparisons}
+
+even_fit <- cv_trn_nino |> 
+  model(
+    tslm_nino = TSLM(actual_temp ~ trend() + season() + el_nino + la_nina),
+    tslm_trend_season = TSLM(actual_temp ~ trend() + season()),
+    tslm_box_cox = TSLM(box_cox(actual_temp, lambda = 1.5) ~ trend() + season()),
+    tslm_piecewise = TSLM(actual_temp ~ trend(knots = c(1920, 1975)) + season())
+  )
+
+even_fit |> 
+  accuracy() |> 
+  group_by(.model) |>
+  summarise(across(.cols = c(RMSE, MAE, MAPE), .fns = mean)) |> 
+  arrange(RMSE) |> 
+  kable(digits = 2)
+```
+
+```{r nino-forecasts}
+
+tslm_nino_fc <- even_fit |> 
+  forecast(new_data = cv_valid)
+
+tslm_nino_fc |> 
+  accuracy(cv_valid) |> 
+  group_by(.model) |>
+  summarise(across(.cols = c(RMSE, MAE, MAPE), .fns = mean)) |> 
+  arrange(RMSE)
+
+tslm_nino_fc |>
+  filter(.id %in% c(20, 21)) |>
+  autoplot() +
+  autolayer(converted_df |> filter(year(Date) >= 2000), actual_temp) +
+  facet_grid(.model ~ .id) +
+  theme_minimal()
+```

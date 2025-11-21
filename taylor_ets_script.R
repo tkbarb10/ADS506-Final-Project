@@ -63,11 +63,6 @@ ets_fc |>
   facet_grid(.model ~ .id) +
   theme_minimal()
 
-ets_fc |>
-  filter(.model == "box_cox_auto") |> 
-  group_by(.model, Date) |> 
-  summarise(across(.cols = .mean, .fns = mean)) |> 
-  autoplot()
 
 # Plot residuals by model
 ets_fit |> 
