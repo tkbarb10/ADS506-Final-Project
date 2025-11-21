@@ -7,7 +7,7 @@ format:
     toc: true
 ---
 
-```{r setup, include=FALSE}
+```{r setup, include=FALSE, echo=FALSE, message=FALSE, warning=FALSE}
 library(fpp3)
 library(tidyverse)
 library(gt)
@@ -25,4 +25,76 @@ df <- read_csv("data/global_temp.csv")
 dim(df)
 
 str(df)
+
+summary(df[3:12])
 ```
+
+## Convert to Tsibble and Temperatures
+
+Explain here about converting to temperatures and why
+
+
+```{r convert-tsibble}
+
+temp_data <- df |> mutate(
+  Month = month.abb[Month],
+  Date = yearmonth(paste(Month, Year)),
+  Monthly_Anomaly = replace_na(Monthly_Anomaly, mean(Monthly_Anomaly, na.rm = T))) |>
+  select(c(Date, Monthly_Anomaly)) |> 
+  as_tsibble(index = Date)
+
+baseline_vector <- c(
+  '1' = 12.30, '2' = 12.50, '3' = 13.13, '4' = 14.06, 
+  '5' = 15.00, '6' = 15.66, '7' = 15.90, '8' = 15.75, 
+  '9' = 15.18, '10' = 14.27, '11' = 13.28, '12' = 12.57
+)
+
+converted_df <- temp_data |> 
+  mutate(
+    month_char = as.character(month(Date)),
+    baseline_temp = baseline_vector[month_char],
+    actual_temp = baseline_temp + Monthly_Anomaly
+    ) |> 
+  select(c(Date, actual_temp))
+```
+
+# Exploratory Data Analysis of Global Anomalies
+
+```{r eda-global-anomalies}
+
+```
+
+# Exploratory Data Analysis of Actual Global Temperatures
+
+```{r eda-actual-temperatures}
+
+summary(converted_df[2:3])
+
+converted_df |> 
+  model(STL(actual_temp)) |> 
+  components() |> 
+  autoplot() +
+  labs(title = "STL Decomposition of Global Monthly Actual Temperatures") +
+  theme_minimal()
+```
+
+Notes on what we see with the components.  Constant seasonal, trend mainly flat until around 1980 then increasing, some remainder
+
+
+```{r transformations}
+
+features(converted_df, actual_temp, guerrero)
+```
+
+Lamdba estimation of 1.44, so a power transformation may be helpful
+
+```{r acf-pacf}
+
+gg_tsdisplay(converted_df, actual_temp, plot_type = 'partial')
+
+features(converted_df, actual_temp, c(unitroot_kpss, unitroot_ndiffs, unitroot_nsdiffs))
+```
+
+much more clearly see the seasonal auto correlation now
+
+need at least one difference and one seasonal difference
