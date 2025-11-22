@@ -256,11 +256,16 @@ full_temp_nino <- converted_df |>
   ) |> 
   select(-join_year, -Phase, -Strength) |> 
   filter(year(Date) > 1895) # this is the first year in the el nino data
+
+tslm_model <- read_rds("data/tslm_regressor_ts.rds")
+tslm_model <- tslm_model |> as_tsibble()
 ```
+
+"How in depth do we need to go on the regressor data?"
 
 ```{r modeling-with-el_nino}
 
-cv_nino_data <- full_temp_nino |> 
+cv_nino_data <- tslm_model |> 
   stretch_tsibble(.init = 397, .step = 58)
 
 cv_trn_nino <- cv_nino_data |> 
@@ -276,7 +281,10 @@ cv_valid <- cv_nino_data |>
 
 nino_fit <- cv_trn_nino |> 
   model(
-    tslm_nino = TSLM(actual_temp ~ trend() + season() + el_nino + la_nina)
+    tslm_nino = TSLM(actual_temp ~ trend() + season() + el_nino + la_nina),
+    tslm_co2 = TSLM(actual_temp ~ trend() + season() + el_nino + la_nina + co2),
+    tslm_ch4 = TSLM(actual_temp ~ trend() + season() + el_nino + la_nina + co2 + ch4),
+    tslm_tsi = TSLM(actual_temp ~ trend() + season() + el_nino + la_nina + co2 + ch4 + TSI)
   )
 
 nino_fit |> 
