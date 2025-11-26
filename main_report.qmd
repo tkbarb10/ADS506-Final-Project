@@ -12,6 +12,7 @@ library(fpp3)
 library(tidyverse)
 library(knitr)
 library(gt)
+library(urca)
 ```
 
 # Introduction
@@ -60,15 +61,205 @@ converted_df <- temp_data |>
 
 # Exploratory Data Analysis of Global Anomalies
 
-```{r eda-global-anomalies}
+```{r}
+climate_raw <- readr::read_csv(
+  "gistemp_monthly_anomalies.csv",
+  skip = 1  # skip "Land-Ocean Temperature Index (C)"
+)
+```
+
+```{r}
+glimpse(climate_raw)
+names(climate_raw)
 
 ```
+
+With annual anomaly data dating back to 1880, the raw series shows substantial year-to-year fluctuations, while the LOWESS-smoothed line clarifies the unmistakable upward trend in global temperatures.
+
+```{r}
+climate_clean <- climate_raw |>
+  janitor::clean_names() |>
+  rename(
+    year        = year,
+    no_smoothing = no_smoothing,
+    lowess_5    = lowess_5
+  )
+```
+
+```{r}
+glimpse(climate_clean)
+names(climate_clean)
+```
+
+```{r}
+climate_ts <- climate_clean |>
+  as_tsibble(index = year)
+
+climate_ts
+```
+
+The 1880s exhibit consistently negative temperature anomalies, with both raw and smoothed values showing a clear cool period centered around 1885–1887.
+
+```{r}
+climate_ts |>
+  autoplot(no_smoothing) +
+  labs(
+    title = "Annual Global Temperature Anomalies (No Smoothing)",
+    x = "Year",
+    y = "Temperature Anomaly (°C, relative to 1951–1980)"
+  ) +
+  theme_minimal()
+
+```
+
+Temperatures fluctuate annually but show a clear upward trend, with modern anomalies far exceeding those of the early record.
+
+```{r}
+climate_stl <- climate_ts |>
+  model(
+    STL(no_smoothing ~ trend(window = 15))
+  ) |>
+  components()
+```
+
+```{r}
+autoplot(climate_stl) +
+  labs(
+    title = "STL Decomposition of Annual Temperature Anomalies",
+    x = "Year"
+  ) +
+  theme_minimal()
+```
+
+The STL results highlight how the underlying warming signal has grown stronger over time, while the remainder shows noisy but relatively modest deviations from the trend. This reinforces that annual variability exists but is dwarfed by the long-term increase in global temperatures.
+
+```{r}
+climate_ts |>
+  gg_tsdisplay(no_smoothing, plot_type = "partial") +
+  labs(
+    title = "Annual Temperature Anomalies: Time Plot, ACF, and PACF"
+  )
+
+```
+
+The climate series exhibits a persistent warming trend, and the ACF’s slow decay underscores how each year’s temperature is tightly linked to previous years. The PACF’s immediate drop-off reinforces that this warming signal creates strong year-to-year inertia in global temperatures.
+
+```{r}
+# KPSS
+climate_ts |>
+  features(no_smoothing, unitroot_kpss)
+```
+
+The KPSS test confirms what the plots already suggest: the anomaly series isn’t stationary, with the low p-value indicating that the warming trend dominates over random fluctuations.
+
+```{r}
+# Non-seasonal differencing needed?
+climate_ts |>
+  features(no_smoothing, unitroot_ndiffs)
+
+climate_ts |>
+  features(no_smoothing, guerrero)
+```
+
+λ ≈ 1.16 → little to no Box–Cox transformation needed; variance is already stable.
+
+```{r eda-global-anomalies}
+#| label: data-gistemp
+#| echo: true
+#| message: false
+#| warning: false
+
+temp_raw <- read_csv("global_tavg_monthly_cleaned_full.csv")
+
+temp_ts <- temp_raw %>%
+  mutate(
+    Month = yearmonth(paste(Year, Month, sep = "-"))
+  ) %>%
+  # rename Monthly_Anomaly -> Anomaly so the rest of the code works
+  rename(Anomaly = Monthly_Anomaly) %>%
+  as_tsibble(index = Month) %>%
+  arrange(Month)
+
+train <- temp_ts %>% filter(Month < yearmonth("2020 Jan"))
+test  <- temp_ts %>% filter(Month >= yearmonth("2020 Jan"))
+
+autoplot(temp_ts, Anomaly) +
+  labs(title = "Global Monthly Temperature Anomalies",
+       x = "Year", y = "Temperature Anomaly (°C)")
+
+```
+
+The plot shows that what was once mostly cooler-than-average global temperatures has transitioned into a new normal of sustained warming, particularly over the last 40 years. The sharp upward trend in recent decades signals the accelerating pace of climate change.
+
+```{r}
+#| label: ets-model
+#| echo: true
+#| message: false
+#| warning: false
+
+# Fit ETS on the training data
+
+fit_ets <- train %>%
+model(ETS(Anomaly))
+
+# Print model details
+
+report(fit_ets)
+
+```
+
+```{r}
+#| label: ets-forecast
+#| echo: true
+#| fig-cap: "Auto-ETS forecast vs actuals (full dataset)."
+
+# Forecast same horizon as test (2020–2025)
+
+fc_ets <- fit_ets %>%
+forecast(h = nrow(test))
+
+# Plot ETS forecast on the full timeline
+
+autoplot(fc_ets, temp_ts) +
+labs(
+title = "Auto-ETS Forecast vs Actuals",
+subtitle = "ETS model for monthly global temperature anomalies",
+x = "Year",
+y = "Temperature Anomaly (°C)"
+)
+
+```
+
+The ETS(A,N,A) output highlights that although global temperatures fluctuate month to month, the underlying seasonal rhythm has stayed remarkably consistent across the historical record. The model assigns almost no seasonal updating (γ ≈ 0), indicating that warming is happening **in the level of the series rather than in the seasonal structure**.
+
+```{r}
+#| label: ets-forecast-zoom
+#| echo: true
+#| fig-cap: "Auto-ETS forecast vs actuals (2020–2025)."
+
+fc_ets_zoom <- fc_ets %>%
+filter_index("2020 Jan" ~ "2025 Dec")
+
+autoplot(
+fc_ets_zoom,
+temp_ts %>% filter_index("2020 Jan" ~ "2025 Dec")
+) +
+labs(
+title = "Auto-ETS Forecast vs Actuals (2020–2025)",
+subtitle = "Automatically selected ETS model",
+x = "Year",
+y = "Temperature Anomaly (°C)"
+)
+
+```
+
+The ETS model anticipates a fairly stable temperature anomaly level, yet the actual data reveal stronger warming spikes that repeatedly push toward the top of the prediction bands. This mismatch shows how rapidly recent warming is occurring relative to historical seasonal patterns captured by the model.
 
 # Exploratory Data Analysis of Actual Global Temperatures
 
 ```{r eda-actual-temperatures}
 
-summary(converted_df[2:3])
+summary(converted_df[2])
 
 converted_df |> 
   model(STL(actual_temp)) |> 
@@ -78,7 +269,7 @@ converted_df |>
   theme_minimal()
 ```
 
-Notes on what we see with the components.  Constant seasonal, trend mainly flat until around 1980 then increasing, some remainder
+Notes on what we see with the components. Constant seasonal, trend mainly flat until around 1980 then increasing, some remainder
 
 ```{r gg-season}
 
@@ -127,7 +318,7 @@ cv_trn <- trn_data |>
   stretch_tsibble(.init = 960, .step = 60)
 ```
 
-Modeling on all temp data prior to 2020, with cross validation sets created from the first 80 years of data (1850 - 1930) and rolling forward by 5 years (60 months).  1930 is when the temperature trend begins to increase more noticeably, so this will allow us to see how well the models can adapt to that change over time.
+Modeling on all temp data prior to 2020, with cross validation sets created from the first 80 years of data (1850 - 1930) and rolling forward by 5 years (60 months). 1930 is when the temperature trend begins to increase more noticeably, so this will allow us to see how well the models can adapt to that change over time.
 
 ### ETS
 
