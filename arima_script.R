@@ -1,6 +1,8 @@
 library(fpp3)
 library(tidyverse)
 
+cv_data
+
 arima_fit <- cv_data |> 
   model(
     arima_lag_ppm  = ARIMA(actual_temp ~ lagged_log_ppm + pdq(p = 1, d = 0, q = 1) + PDQ(P = 3, D = 1, Q = 0, period = 12))

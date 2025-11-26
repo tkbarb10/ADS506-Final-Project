@@ -50,7 +50,7 @@ write_rds(final_monthly, "data/legit_monthly_co2.rds")
 
 
 annual_convert <- annual_co2 |> 
-  filter(between(Year, 1896, 1969)) |> 
+  filter(Year < 1970) |> 
   uncount(12, .id = "Month") |> 
   mutate(
     Date = make_yearmonth(year = Year, month = Month),
@@ -60,7 +60,7 @@ annual_convert <- annual_co2 |>
   as_tsibble(index = Date)
 
 annual_bio_convert <- co2_land_use |> 
-  filter(between(Year, 1896, 1969)) |> 
+  filter(Year <= 1969) |> 
   uncount(12, .id = "Month") |> 
   mutate(
     Date = make_yearmonth(year = Year, month = Month),
@@ -77,4 +77,4 @@ earlier_co2_data <- combined_monthly_convert |>
   mutate(Total_CO2 = (monthly_bio_co2 + monthly_co2)) |> 
   select(c(Date, Total_CO2))
 
-write_rds(earlier_co2_data, "data/early_co2_monthly.rds")
+write_rds(earlier_co2_data, "data/early_co2_monthly_1850.rds")
