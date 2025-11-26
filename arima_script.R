@@ -1,11 +1,11 @@
 library(fpp3)
 library(tidyverse)
 
-cv_data
-
 arima_fit <- cv_data |> 
   model(
-    arima_lag_ppm  = ARIMA(actual_temp ~ lagged_log_ppm + pdq(p = 1, d = 0, q = 1) + PDQ(P = 3, D = 1, Q = 0, period = 12))
+    arima_lag_ppm  = ARIMA(actual_temp ~ log(lagged_ppm_five) + pdq(p = 1, d = 0, q = 0:3) + PDQ(P = 0:2, D = 1, Q = 0:2, period = 12)),
+    arima_auto = ARIMA(actual_temp ~ pdq(p = 1, d = 0, q = 0:3) + PDQ(P = 0:2, D = 1, Q = 0:2, period = 12) + co2_ppm + TSI + ch4),
+    arima_trans = ARIMA(actual_temp ~ pdq(p = 1, d = 0, q = 0:3) + PDQ(P = 0:2, D = 1, Q = 0:2, period = 12) + log(co2_ppm) + TSI + box_cox(ch4, 2))
   )
 
 arima_fit |> 

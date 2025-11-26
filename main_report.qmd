@@ -120,6 +120,7 @@ Using ETS, TSLM and ARIMA models on both anomalies and actual temperatures
 ## Actual Temperature Modeling
 
 ```{r training-split}
+
 trn_data <- converted_df |>
   filter(year(Date) < 2020)
 
@@ -154,11 +155,11 @@ ets_fit <- cv_trn |>
     kable(digits = 2)
 
   ets_fit |> 
-  tidy() |> 
-  group_by(.model, term) |> 
-  summarise(across(.cols = estimate, .fns = mean)) |> 
-  pivot_wider(names_from = term, values_from = estimate) |> 
-  kable(digits = 2)
+    tidy() |> 
+    group_by(.model, term) |> 
+    summarise(across(.cols = estimate, .fns = mean)) |> 
+    pivot_wider(names_from = term, values_from = estimate) |> 
+    kable(digits = 2)
 ```
 
 ```{r ets-forecasts}
