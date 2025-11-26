@@ -419,20 +419,6 @@ tslm_fit |>
   select(tslm_fourier) |>
   tail(1) |>
   report()
-
-## Full parameter table output
-# tslm_fit |> 
-#   tidy() |> 
-#   group_by(.model, term) |> 
-#   summarise(across(
-#       .cols = c(estimate, std.error, statistic, p.value),
-#       .fns = mean)
-#   ) |> 
-#   pivot_wider(
-#     names_from = term, 
-#     values_from = c(estimate, std.error, statistic, p.value)
-#   ) |> 
-#     kable(digits = 2)
 ```
 
 ```{r regressor-data}
@@ -450,81 +436,74 @@ full_temp_nino <- converted_df |>
   filter(year(Date) > 1895) # this is the first year in the el nino data
 
 tslm_model <- read_rds("data/tslm_regressor_ts.rds")
-tslm_model <- tslm_model |> as_tsibble()
 ```
 
 "How in depth do we need to go on the regressor data?"
 
 ```{r modeling-with-el_nino}
 
-cv_nino_data <- tslm_model |> 
-  stretch_tsibble(.init = 397, .step = 58)
+# Creates 20 splits
+cv_data <- tslm_model |> 
+  stretch_tsibble(.init = 837, .step = 60)
 
-cv_trn_nino <- cv_nino_data |> 
+cv_trn <- cv_data |> 
   group_by(.id) |> 
   slice(1:(n() - 60)) |> 
   ungroup()
 
-cv_valid <- cv_nino_data |> 
+cv_valid <- cv_data |> 
   group_by(.id) |> 
   slice_tail(n = 60) |> 
   ungroup()
 
-
-nino_fit <- cv_trn_nino |> 
+# Comparing the best models with regressors added in on the same data split
+tslm_regressor_fit <- cv_trn |> 
   model(
+    tslm_trend_season = TSLM(actual_temp ~ trend() + season()),
+    tslm_log = TSLM(log(actual_temp) ~ trend() + season()),
+    tslm_box_cox = TSLM(box_cox(actual_temp, lambda = 1.5) ~ trend() + season()),
+    tslm_piecewise = TSLM(actual_temp ~ trend(knots = c(1920, 1975)) + season()),
     tslm_nino = TSLM(actual_temp ~ trend() + season() + el_nino + la_nina),
-    tslm_co2 = TSLM(actual_temp ~ trend() + season() + el_nino + la_nina + co2),
-    tslm_ch4 = TSLM(actual_temp ~ trend() + season() + el_nino + la_nina + co2 + ch4),
-    tslm_tsi = TSLM(actual_temp ~ trend() + season() + el_nino + la_nina + co2 + ch4 + TSI)
+    tslm_co2_nino = TSLM(actual_temp ~ trend() + season() + el_nino + la_nina + co2),
+    tslm_ch4_co2_nino = TSLM(actual_temp ~ trend() + season() + el_nino + la_nina + co2 + ch4),
+    tslm_all = TSLM(actual_temp ~ trend() + season() + el_nino + la_nina + co2 + ch4 + TSI),
+    tslm_all_box = TSLM(box_cox(actual_temp, lambda = 1.5) ~ trend() + season() + el_nino + la_nina + co2 + ch4 + TSI)
   )
 
-nino_fit |> 
+tslm_regressor_fit |> 
   accuracy() |> 
   group_by(.model) |>
   summarise(across(.cols = c(RMSE, MAE, MAPE), .fns = mean)) |> 
   arrange(RMSE) |> 
-  kable(digits = 2)
+  kable(digits = 4)
 
-nino_fit |> 
-  select(tslm_nino) |>
+# check report of best model fit on most data
+tslm_regressor_fit |> 
+  select(tslm_all_box) |>
   tail(n = 1) |> 
   report()
 ```
 
-```{r even-comparisons}
+Best model according to the training data is the tslm modeling with the box cox transformation and adding in all predictors.  Every variable shows as significant
 
-even_fit <- cv_trn_nino |> 
-  model(
-    tslm_nino = TSLM(actual_temp ~ trend() + season() + el_nino + la_nina),
-    tslm_trend_season = TSLM(actual_temp ~ trend() + season()),
-    tslm_box_cox = TSLM(box_cox(actual_temp, lambda = 1.5) ~ trend() + season()),
-    tslm_piecewise = TSLM(actual_temp ~ trend(knots = c(1920, 1975)) + season())
-  )
+```{r regressor-forecasts}
 
-even_fit |> 
-  accuracy() |> 
-  group_by(.model) |>
-  summarise(across(.cols = c(RMSE, MAE, MAPE), .fns = mean)) |> 
-  arrange(RMSE) |> 
-  kable(digits = 2)
-```
-
-```{r nino-forecasts}
-
-tslm_nino_fc <- even_fit |> 
+tslm_fc <- tslm_regressor_fit |> 
   forecast(new_data = cv_valid)
 
-tslm_nino_fc |> 
+tslm_fc |> 
   accuracy(cv_valid) |> 
   group_by(.model) |>
   summarise(across(.cols = c(RMSE, MAE, MAPE), .fns = mean)) |> 
   arrange(RMSE)
 
-tslm_nino_fc |>
-  filter(.id %in% c(20, 21)) |>
-  autoplot() +
-  autolayer(converted_df |> filter(year(Date) >= 2000), actual_temp) +
-  facet_grid(.model ~ .id) +
+# Visualize top 4 models
+tslm_fc |> 
+  filter(.id %in% c(12, 13), .model %in% c("tslm_all_box", "tslm_all", "tslm_ch4_co2_nino", "tslm_co2_nino")) |> 
+  autoplot() + 
+  autolayer(tslm_model |> filter(year(Date) >= 2010), actual_temp) + 
+  facet_grid(.model ~ .id) + 
   theme_minimal()
 ```
+
+Results hold up on the validation data
