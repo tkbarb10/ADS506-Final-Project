@@ -13,6 +13,11 @@ library(tidyverse)
 library(knitr)
 library(gt)
 library(urca)
+library(tsibble)
+library(fable)
+library(fabletools)
+library(feasts)
+library(dplyr)
 ```
 
 # Introduction
@@ -254,6 +259,54 @@ y = "Temperature Anomaly (°C)"
 ```
 
 The ETS model anticipates a fairly stable temperature anomaly level, yet the actual data reveal stronger warming spikes that repeatedly push toward the top of the prediction bands. This mismatch shows how rapidly recent warming is occurring relative to historical seasonal patterns captured by the model.
+
+```{r}
+climate_ts <- climate_clean |>
+  as_tsibble(index = year)
+```
+
+```{r}
+features(climate_ts, no_smoothing, unitroot_ndiffs)
+```
+
+The ndiffs() test indicates that the series requires one regular difference (d = 1) to achieve stationarity, consistent with the KPSS result showing strong trend non-stationarity. This confirms that an ARIMA model with d = 1 is appropriate for the anomaly series.
+
+```{fit_arima <- climate_ts |>}
+  model(ARIMA(no_smoothing))
+```
+
+```{r}
+report(fit_arima)
+```
+
+The auto-ARIMA procedure selected an **ARIMA(1,1,3) with drift**, indicating that the series requires one difference to remove the long-term warming trend, while the AR(1) and multiple MA terms capture the strong year-to-year autocorrelation seen in the ACF and PACF. The positive drift term (0.0175) represents the **average yearly increase** in the global temperature anomaly, consistent with the long-term upward trend.
+
+```{r}
+fc_arima <- fit_arima |>
+  forecast(h = 20)
+```
+
+```{r}
+library(ggplot2)
+
+fc_arima |>
+  autoplot(climate_ts) +
+  labs(
+    title = "ARIMA Forecast of Annual Global Temperature Anomalies",
+    x = "Year",
+    y = "Temperature Anomaly (°C)"
+  ) +
+  theme_minimal()
+```
+
+The ARIMA(1,1,3) forecast shows a persistent upward trajectory consistent with the historical warming trend, with anomalies likely reaching or exceeding **1.3–1.5°C** by mid-century. The prediction intervals widen over time, but their lower bounds remain well above the 20th-century baseline, reinforcing the robustness of the projected warming.
+
+```{r}
+fit_arima |>
+  gg_tsresiduals()
+```
+
+The diagnostic plots suggest that the ARIMA model has stripped out the trend and autocorrelation from the data, leaving behind only random year-to-year noise. With no remaining structure in the ACF and residuals centered on zero, the model passes the key adequacy checks.
 
 # Exploratory Data Analysis of Actual Global Temperatures
 
