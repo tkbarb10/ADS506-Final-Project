@@ -313,7 +313,10 @@ Using ETS, TSLM and ARIMA models on both anomalies and actual temperatures
 ```{r training-split}
 
 trn_data <- converted_df |>
-  filter(year(Date) < 2020)
+  slice(1:(n() - 60))
+
+valid_data <- converted_df |> 
+  slice_tail(n = 60)
 
 cv_trn <- trn_data |> 
   stretch_tsibble(.init = 960, .step = 60)
@@ -338,19 +341,19 @@ ets_fit <- cv_trn |>
 
 ```{r ets-training-metrics}
 
-  ets_fit |> 
-    accuracy() |> 
-    group_by(.model) |> 
-    summarise(across(.cols = c(RMSE, MAE, MAPE), .fns = mean)) |> 
-    arrange(RMSE) |> 
-    kable(digits = 2)
+ets_fit |> 
+  accuracy() |> 
+  group_by(.model) |> 
+  summarise(across(.cols = c(RMSE, MAE, MAPE), .fns = mean)) |> 
+  arrange(RMSE) |> 
+  kable(digits = 2)
 
-  ets_fit |> 
-    tidy() |> 
-    group_by(.model, term) |> 
-    summarise(across(.cols = estimate, .fns = mean)) |> 
-    pivot_wider(names_from = term, values_from = estimate) |> 
-    kable(digits = 2)
+ets_fit |> 
+  tidy() |> 
+  group_by(.model, term) |> 
+  summarise(across(.cols = estimate, .fns = mean)) |> 
+  pivot_wider(names_from = term, values_from = estimate) |> 
+  kable(digits = 2)
 ```
 
 ```{r ets-forecasts}
@@ -363,7 +366,7 @@ ets_fc <- ets_fit |>
 ets_fc |> 
   accuracy(converted_df) |>
   arrange(RMSE) |> 
-  kable(digets = 2)
+  kable(digits = 2)
 ```
 
 ```{r ets-diagnostics}
@@ -404,7 +407,7 @@ tslm_fit <- cv_trn |>
   )
 ```
 
-Fourier terms for a simpler model, piecewise to capture changes in trend at those points
+Fourier terms for a simpler model, piece-wise to capture changes in trend at those points
 
 ```{r tslm-training-metrics}
 
@@ -442,7 +445,6 @@ tslm_model <- read_rds("data/tslm_regressor_ts.rds")
 
 ```{r modeling-with-el_nino}
 
-# Creates 20 splits
 cv_data <- tslm_model |> 
   stretch_tsibble(.init = 837, .step = 60)
 
@@ -507,3 +509,139 @@ tslm_fc |>
 ```
 
 Results hold up on the validation data
+
+### ARIMA
+
+mention lagged data?  Bring it up earlier?
+
+```{r arima-data}
+
+lagged_data <- read_rds("data/lagged_predictors.rds")
+
+arima_data <- read_rds('data/lagged_nino_predictors.rds')
+
+trn_data <- arima_data |>
+  slice(1:(n() - 60))
+
+valid_data <- arima_data |> 
+  slice_tail(n = 60)
+```
+
+```{r initial-arima}
+
+arima_fit <- trn_data |> 
+  model(
+    arima_auto = ARIMA(actual_temp),
+    arima_box = ARIMA(box_cox(actual_temp, lambda = 1.5)),
+    arima_log = ARIMA(log(actual_temp)),
+    arima_all = ARIMA(actual_temp ~ co2_ppm + ch4 + TSI + el_nino + la_nina),
+    arima_ppm_ten = ARIMA(actual_temp ~ lagged_ppm_ten),
+    arima_lag_ten_nino = ARIMA(actual_temp ~ lagged_ppm_ten + el_nino + la_nina),
+    arima_all_log = ARIMA(log(actual_temp) ~ co2_ppm + ch4 + TSI + el_nino + la_nina),
+    arima_all_log_lag = ARIMA(log(actual_temp) ~ lagged_ppm_ten + ch4 + TSI + el_nino + la_nina)
+  )
+
+arima_fit |> 
+  accuracy() |> 
+  arrange(RMSE) |> 
+  gt() |> 
+  fmt_number(decimal = 4)
+```
+
+```{r arima-validation}
+
+arima_fc <- arima_fit |> 
+  forecast(new_data = valid_data)
+
+arima_fc |> 
+  accuracy(valid_data) |> 
+  arrange(RMSE) |> 
+  gt() |> 
+  fmt_number(decimal = 4)
+
+# spot check models
+arima_fit |> 
+  select(arima_log) |> 
+  report()
+
+# parameter check
+arima_fit |> 
+  tidy() |> 
+  group_by(.model, term) |> 
+  summarize(across(.cols = c(estimate:`p.value`), .fns = mean)) |> 
+  filter(.model == "arima_lag_ten_nino")
+```
+
+Using top models and parameter set ups for cv training
+
+```{r arima-cv}
+
+# 12 splits
+cv_data <- arima_data |> 
+  stretch_tsibble(.init = 837, .step = 60)
+
+cv_trn <- cv_data |> 
+  group_by(.id) |> 
+  slice(1:(n() - 60)) |> 
+  ungroup()
+
+cv_valid <- cv_data |> 
+  group_by(.id) |> 
+  slice_tail(n = 60) |> 
+  ungroup()
+
+arima_cv_fit <- cv_trn |> 
+  model(
+    arima_log_lag_nino = ARIMA(log(actual_temp) ~ pdq(0, 0, 1) + PDQ(0, 1, 1) + lagged_ppm_ten + el_nino + la_nina),
+    arima_log_ppm_nino = ARIMA(log(actual_temp) ~ pdq(0, 0, 2) + PDQ(0, 1, 1) + co2_ppm + el_nino + la_nina),
+    arima_all = ARIMA(actual_temp ~ pdq(0, 0, 2) + PDQ(0, 1, 1) + co2_ppm + ch4 + TSI + el_nino + la_nina),
+    arima_ppm_ten = ARIMA(actual_temp ~ pdq(3, 0, 2) + PDQ(1, 1, 0) + lagged_ppm_ten),
+    arima_lag_ten_nino = ARIMA(actual_temp ~ pdq(1, 0, 0) + PDQ(1, 1, 0) +lagged_ppm_ten + el_nino + la_nina),
+    arima_log = ARIMA(log(actual_temp) ~ pdq(2, 0, 2) + PDQ(1, 1, 0))
+  )
+
+arima_fit |> 
+  accuracy() |> 
+  group_by(.model) |> 
+  summarize(across(.cols = c(ME:MAPE), .fns = mean)) |> 
+  arrange(RMSE)
+
+arima_fc <- arima_fit |> 
+  forecast(new_data = cv_valid)
+
+arima_fc |> 
+  accuracy(cv_valid) |> 
+  group_by(.model) |> 
+  summarize(across(.cols = c(ME:MAPE), .fns = mean)) |> 
+  arrange(RMSE)
+```
+
+```{r arima_cv_visual}
+
+arima_fc |>
+  filter(.id %in% c(12, 13)) |> 
+  autoplot() +
+  autolayer(arima_data |> filter(year(Date) >= 2010), actual_temp) +
+  facet_wrap(~ .model, ncol = 1) +
+  theme_minimal()
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

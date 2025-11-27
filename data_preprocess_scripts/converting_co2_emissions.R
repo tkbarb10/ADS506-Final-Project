@@ -3,7 +3,7 @@ library(tidyverse)
 library(readxl)
 
 
-# all values in annaul are in million tons of carbon per year.  For CO2, multiply by 3.664
+# all values in annual are in million tons of carbon per year.  For CO2, multiply by 3.664
 # starts at 1850 
 
 annual_co2 <- read_csv("C:/Users/tkbar/OneDrive/Desktop/ADS 506/annual_co2.csv")
