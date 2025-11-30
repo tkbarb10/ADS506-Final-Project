@@ -544,8 +544,7 @@ arima_fit <- trn_data |>
 arima_fit |> 
   accuracy() |> 
   arrange(RMSE) |> 
-  gt() |> 
-  fmt_number(decimal = 4)
+  kable(digits = 4)
 ```
 
 ```{r arima-validation}
@@ -556,8 +555,7 @@ arima_fc <- arima_fit |>
 arima_fc |> 
   accuracy(valid_data) |> 
   arrange(RMSE) |> 
-  gt() |> 
-  fmt_number(decimal = 4)
+  kable(digits = 4)
 
 # spot check models
 arima_fit |> 
@@ -600,13 +598,13 @@ arima_cv_fit <- cv_trn |>
     arima_log = ARIMA(log(actual_temp) ~ pdq(2, 0, 2) + PDQ(1, 1, 0))
   )
 
-arima_fit |> 
+arima_cv_fit |> 
   accuracy() |> 
   group_by(.model) |> 
   summarize(across(.cols = c(ME:MAPE), .fns = mean)) |> 
   arrange(RMSE)
 
-arima_fc <- arima_fit |> 
+arima_fc <- arima_cv_fit |> 
   forecast(new_data = cv_valid)
 
 arima_fc |> 
