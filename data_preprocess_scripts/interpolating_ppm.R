@@ -2,6 +2,15 @@ library(zoo)
 
 mauna_loa <- read_csv("data/mauna_loa_co2.csv")
 
+icecore <- read_csv("data/annual_co2_icecore.csv")
+
+no2 <- read_csv("C:/Users/tkbar/Downloads/data_2025-11-30.csv", skip = 1)
+
+ch4 <- read_csv("C:/Users/tkbar/Downloads/data_2025-11-30 (1).csv", skip = 1)
+
+mauna_n20 <- read_csv("C:/Users/tkbar/Downloads/n2o_mm_gl.csv", skip = 45)
+mauna_ch4 <- read_csv("C:/Users/tkbar/Downloads/ch4_mm_gl (1).csv", skip = 45)
+
 loa_ts <- mauna_loa |> 
   mutate(
     Date = make_yearmonth(year = year, month = month)
@@ -22,8 +31,6 @@ seasonal_trend <- mauna_loa |>
   group_by(month(Date)) |> 
   summarise(co2_season = mean(season_year)) |> 
   rename(month = `month(Date)`)
-
-icecore <- read_csv("data/annual_co2_icecore.csv")
 
 full_ts <- icecore |> 
   mutate(
@@ -48,9 +55,3 @@ full_ts <- icecore |>
   rename(co2_ppm = final_co2) |> 
   bind_rows(loa_ts)
 
-full_ts |> 
-  model(STL()) |> 
-  components() |> 
-  autoplot()
-
-write_rds(full_ts, "data/interpolated_co2_ppm.rds")

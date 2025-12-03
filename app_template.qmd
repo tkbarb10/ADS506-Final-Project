@@ -18,6 +18,7 @@ library(gt)
 time_series <- read_rds("data/time_series_visual.rds")
 actual_temps <- read_rds("data/converted_global_temp.rds")
 modeling_data <- read_rds("data/lagged_nino_predictors.rds")
+country_2024_baseline <- read_rds("country_2024_baseline_Gt.rds")
 ```
 
 
@@ -119,7 +120,7 @@ ppm_model <- modeling_data |>
 
 # --- 1. User Inputs (These would come from your App UI) ---
 input_years <- 5          # User wants 5 years forecast
-input_growth_pct <- 1.0  # User wants 1% monthly growth in emissions
+input_growth_pct <- 2.0  # User wants 1% monthly growth in emissions
 n_months <- input_years * 12
 
 # --- 2. Get Baseline Values (The specific numbers from the very last historical row) ---
@@ -148,7 +149,7 @@ future_scenario <- tibble(
 # --- 4. Handle the Lags Correctly ---
 # We must stick history and future together briefly so lag(ENSO) works 
 # for the first few months of 2025 (looking back at late 2024)
-full_data_linked <- bind_rows(true_data, future_scenario)
+full_data_linked <- bind_rows(modeling_data, future_scenario)
 
 # --- 5. Extract just the clean Future Scenario ---
 # This is what you pass to your forecast() function

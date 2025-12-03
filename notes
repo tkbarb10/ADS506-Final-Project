@@ -1,0 +1,25 @@
+Arima temp model
+"for every 1 ppm increase, the temp goes up by 0.0109 C"
+
+Arima ppm model
+"For every gigaton of emissions, ppm goes up by 0.0585"
+
+(10559.408 * 3.664 * 1e6) / 1e9 
+("Territorial emissions in Gt")
+
+1.251 * 3.664 
+("Land use contribution in Gt")
+
+Best models initially
+
+ compare_fit <- cv_trn |> 
+  model(
+    ets = ETS(actual_temp ~ error("A") + trend("A") + season("A")),
+    tslm = TSLM(log(actual_temp) ~ trend() + season()),
+    arima = ARIMA(actual_temp ~ 0 + pdq(3, 1, 2) + PDQ(1, 1, 2))
+  )
+ 
+This one is probably the best ARIMA model generally
+
+ Model: ARIMA(1,0,0)(0,1,1)[12] w/ drift 
+Transformation: box_cox(actual_temp, lambda = 1.5) 
