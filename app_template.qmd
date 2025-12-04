@@ -1,0 +1,221 @@
+---
+title: "Impact App"
+author: "Kamran Shirazi & Taylor Kirk"
+format: pdf
+editor: visual
+---
+
+# Purpose
+
+```{r}
+#| message: false
+#| warning: false
+library(fpp3)
+library(tidyverse)
+library(gt)
+
+# data to use for time series
+time_series <- read_rds("data/time_series_visual.rds")
+actual_temps <- read_rds("data/converted_global_temp.rds")
+modeling_data <- read_rds("data/lagged_nino_predictors.rds")
+country_2024_baseline <- read_rds("country_2024_baseline_Gt.rds")
+```
+
+
+
+## Tab 1: Explore
+
+
+```{r - time-series}
+#CO2 emissions time series
+time_series |> 
+  as_tibble() |> 
+  group_by(year(Date)) |> 
+  summarize(sum = sum(total_co2)) |> 
+  mutate(Date = make_date(`year(Date)`)) |> 
+  rename(`CO2 Emissions` = sum) |> 
+  select(Date, `CO2 Emissions`) |> 
+  filter(year(Date) < 2025) |> 
+  as_tsibble() |> 
+  autoplot() +
+  labs(title = "CO2 Emissions in Gigagrams", x = "Date", subtitle = "Annual Total 1850-2024") +
+  theme_minimal()
+
+#CO2 PPM time series
+time_series |> 
+  mutate(ppm_slide = slider::slide_dbl(co2_ppm, mean, .before = 12)) |> 
+  autoplot(ppm_slide) +
+  labs(title = "CO2 Concentration on a Rolling Annual Basis", subtitle = "Parts Per Million (ppm)", y = "CO2 PPM", x = "Date") +
+  theme_minimal()
+
+#Global Temp time series
+time_series |> 
+  ggplot(aes(x = Date, y = Monthly_Anomaly)) + geom_col(fill = "steelblue4") +
+  labs(
+    title = "Global Temperature", 
+    subtitle = "Departure from 1950-1980 baseline",
+    x = 'Date',
+    y = "Monthly Difference"
+  ) +
+  theme_minimal()
+```
+
+For all the STL decompositions, we can see how the seasonal component stays fairly consistent over time while the main driver is the trend
+
+```{r - stl-decomposition}
+#CO2 emissions
+#1970 is the first year the EIA began documenting monthly global emissions
+
+time_series |> 
+  filter(year(Date) > 1969) |> 
+  model(STL()) |> 
+  components() |> 
+  autoplot() +
+  theme_minimal()
+
+#CO2 PPM
+#1958 was the first year Mauna Loa began recording monthly estimates of co2 concentration
+time_series |> 
+  filter(year(Date) > 1957) |> 
+  model(STL()) |> 
+  components() |> 
+  autoplot() +
+  theme_minimal()
+
+#Actual Global Temperatures
+
+actual_temps |> 
+  model(STL()) |> 
+  components() |> 
+  autoplot() +
+  theme_minimal()
+```
+
+# Tab 2: Impact and Scenario Forecasting
+
+
+## Forecasting model parameters to calculate the users impact
+- temp goes up by 0.0109 C for every unit increase co2_ppm
+
+- ppm goes up by 0.0585 for every Gigaton of CO2 emitted
+
+```{r - scenario-planning}
+
+#Model to use for forecasting
+
+temp_model <- modeling_data |> 
+  filter((year(Date) > 1957)) |> 
+  model(
+    temp_arima = ARIMA(actual_temp ~ co2_ppm + ENSO + fourier(K = 3) + PDQ(0, 0, 0))
+  )
+
+ppm_model <- modeling_data |> 
+  filter((year(Date) > 1957)) |> 
+  model(
+    ppm_arima = ARIMA(co2_ppm ~ 0 + aggregate_emissions + ENSO + PDQ(0, 1, 1) + pdq(1, 1, 1))
+  )
+
+#aggregate emissions in the ppm_arima model is in gigatons
+  
+
+# --- 1. User Inputs (These would come from your App UI) ---
+input_years <- 5          # User wants 5 years forecast
+input_growth_pct <- 2.0  # User wants 1% monthly growth in emissions
+n_months <- input_years * 12
+
+# --- 2. Get Baseline Values (The specific numbers from the very last historical row) ---
+last_historical_row <- modeling_data |> tail(1)
+start_date <- last_historical_row$Date
+base_co2_flow <- last_historical_row$Total_CO2           # Current monthly emissions (Gg)
+base_emissions_stock <- last_historical_row$aggregate_emissions # Current total pile (Gt)
+
+# --- 3. Create the Future Dataframe ---
+future_scenario <- tibble(
+  # FIX: For yearmonth objects, just add the sequence 1, 2, 3... to get future months
+  Date = start_date + (1:n_months),
+  ENSO = 0
+) |>
+  mutate(
+    # Calculate Growth
+    growth_factor = 1 + (input_growth_pct / 100),
+    # Compound growth: base * (1.01)^1, base * (1.01)^2, etc.
+    Total_CO2 = base_co2_flow * (growth_factor ^ row_number()),
+    
+    # Calculate Accumulation
+    cumulative_additions_Gt = cumsum(Total_CO2) * 1e-6,
+    aggregate_emissions = base_emissions_stock + cumulative_additions_Gt
+  )
+
+# --- 4. Handle the Lags Correctly ---
+# We must stick history and future together briefly so lag(ENSO) works 
+# for the first few months of 2025 (looking back at late 2024)
+full_data_linked <- bind_rows(modeling_data, future_scenario)
+
+# --- 5. Extract just the clean Future Scenario ---
+# This is what you pass to your forecast() function
+scenario_stable <- full_data_linked |>
+  filter(Date > start_date) |>
+  select(Date, Total_CO2, aggregate_emissions, ENSO)
+
+# --- 6. Pass the future scenario data into the model ---
+
+# This forecast assumes emissions don't change
+stable_fc <- ppm_model |> 
+  forecast(new_data = scenario_stable)
+
+scenario_final <- scenario_stable |> 
+  mutate(co2_ppm = stable_fc$.mean)
+
+stable_temp_forecast <- temp_model |> 
+  forecast(new_data = scenario_final)
+
+# --- 7. Compare the user forecast to the baseline
+
+
+# 1. Convert both forecasts to plain data frames and label them
+df_stable <- as_tibble(stable_temp_forecast) |> mutate(Scenario = "Stable")
+df_user   <- as_tibble(temp_forecast)        |> mutate(Scenario = "User Defined")
+
+# 2. Combine them
+combined_df <- bind_rows(df_stable, df_user)
+
+# 3. Plot Manually
+ggplot() +
+  
+  # The Forecasts (Colored lines by Scenario)
+  geom_line(data = combined_df, 
+            aes(x = Date, y = .mean, color = Scenario), 
+            size = 1) +
+  
+  # Optional: Add the prediction intervals (Ribbons)
+  # Note: .mean is the center, actual_temp is the distribution name
+  # usually fable outputs columns like 'lower' and 'upper' in hilo(), 
+  # but for a simple line plot, we often skip ribbons in Apps to reduce clutter.
+  
+  # Styling
+  scale_color_manual(values = c("Stable" = "blue", 
+                                "User Defined" = "red")) +
+  labs(title = "Temperature Forecast Scenarios",
+       subtitle = "Comparing Stable vs. User Emissions",
+       y = "Temperature Anomaly",
+       x = "Year") +
+  theme_minimal()
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
