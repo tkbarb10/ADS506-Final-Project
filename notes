@@ -23,3 +23,11 @@ This one is probably the best ARIMA model generally
 
  Model: ARIMA(1,0,0)(0,1,1)[12] w/ drift 
 Transformation: box_cox(actual_temp, lambda = 1.5) 
+
+"General notes for arima
+- some sort of lag with co2
+- log transformation
+- some version of nino/enso/smoothed enso
+- seasonal diff
+- no non-seasonal diff
+"
