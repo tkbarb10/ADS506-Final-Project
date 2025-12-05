@@ -13,6 +13,7 @@ library(tidyverse)
 library(knitr)
 library(gt)
 library(urca)
+library(janitor)
 ```
 
 # Introduction
@@ -69,15 +70,20 @@ Reporting in monthly anomalies is common for publications given that the main in
 
 # Exploratory Data Analysis of Global Anomalies
 
--   ***For the data, instead of reading in the gistemp_monthly anomalies, do you want to use the global_temp.csv file? The one I read in above? It goes further back, to 1850 and that way we're staying consistent with the data we're looking at. I also convert it to a tsibble in the code block above (I saved it to the temp_data object)***
-
 ```{r kamran-raw-data}
 #| message: false
 #| warning: false
 climate_raw <- read_csv(
-  "data/gistemp_monthly_anomalies.csv",
-  skip = 1  # skip "Land-Ocean Temperature Index (C)"
+  "data/global_temp.csv",
+  #skip = 1  # skip "Land-Ocean Temperature Index (C)"
 )
+```
+
+```{r kamran-raw-data-overview}
+climate_ts <- climate_raw %>%
+  mutate(date = yearmonth(paste(Year, Month, sep = "-"))) %>%
+  as_tsibble(index = date) %>%
+  select(date, Monthly_Anomaly)
 ```
 
 ```{r kamran-raw-data-overview}
@@ -85,17 +91,16 @@ glimpse(climate_raw)
 names(climate_raw)
 ```
 
-With annual anomaly data dating back to 1880, the raw series shows substantial year-to-year fluctuations, while the LOWESS-smoothed line clarifies the unmistakable upward trend in global temperatures.
+This dataset contains 2,109 monthly observations from 1850–2024, with global temperature anomalies and uncertainties, where **Monthly_Anomaly** is the primary usable series and most multi-year anomaly fields contain NA values except at the end of their smoothing windows.
 
-***Do we want to add a visual here of the time series? Otherwise it's not really clear that there are year-to-year fluctuations or that the LOWESS-smoothed line clarifies the upward trend***
+***Do we want to add a visual here of the time series? Otherwise it's not really clear that there are year-to-year fluctuations or that the LOWESS-smoothed line clarifies the upward trend (I deleted it out)***
 
 ```{r kamran-rename}
 climate_clean <- climate_raw |>
   janitor::clean_names() |>
   rename(
-    year        = year,
-    no_smoothing = no_smoothing,
-    lowess_5    = lowess_5
+    no_smoothing  = monthly_anomaly,
+    lowess_5      = five_year_anomaly
   )
 ```
 
@@ -106,7 +111,10 @@ names(climate_clean)
 
 ```{r kamran-convert-ts}
 climate_ts <- climate_clean |>
-  as_tsibble(index = year)
+  mutate(
+    date = yearmonth(paste(year, month, sep = "-"))
+  ) |>
+  as_tsibble(index = date)
 
 climate_ts
 ```
@@ -144,7 +152,20 @@ autoplot(climate_stl) +
 
 The STL results highlight how the underlying warming signal has grown stronger over time, while the remainder shows noisy but relatively modest deviations from the trend. This reinforces that annual variability exists but is dwarfed by the long-term increase in global temperatures.
 
-***This is where it would be useful to use the monthly observations instead, so we could see the seasonal component***
+```{r kamran-load-monthly}
+
+gistemp_annual <- gistemp_monthly_raw |>
+  rename(raw = land_ocean_temperature_index_c) |>
+  separate(
+    raw,
+    into = c("year", "no_smoothing", "lowess_5"),
+    sep = ","
+  ) |>
+  slice(-1) |>  # drop the header row "Year,No_Smoothing,Lowess(5)"
+  mutate(across(everything(), as.numeric))
+
+glimpse(gistemp_annual)
+```
 
 ```{r kamran-acf}
 #| warning: false
@@ -243,7 +264,8 @@ gg_tsdisplay(converted_df, actual_temp, plot_type = 'partial')
 
 features(converted_df, actual_temp, c(unitroot_kpss, unitroot_ndiffs, unitroot_nsdiffs))
 ```
-Unitroot tests suggest at least one difference and one seasonal difference.  Using `gg_tsdisplay`, the seasonal autocorrelation is obvious, with the summer and winter months grouping together on opposite sides of the line.  The pacf shows that the seasonal effects are strong.  All of this shows the data is not stationary
+
+Unitroot tests suggest at least one difference and one seasonal difference. Using `gg_tsdisplay`, the seasonal autocorrelation is obvious, with the summer and winter months grouping together on opposite sides of the line. The pacf shows that the seasonal effects are strong. All of this shows the data is not stationary
 
 # Modeling / Forecasting
 
@@ -266,30 +288,6 @@ report(fit_ets)
 ```
 
 ```{r}
-#| label: ets-forecast
-#| echo: true
-#| fig-cap: "Auto-ETS forecast vs actuals (full dataset)."
-
-# Forecast same horizon as test (2020–2025)
-
-fc_ets <- fit_ets |> 
-forecast(new_data = test)
-
-# Plot ETS forecast on the full timeline
-
-autoplot(fc_ets) +
-  labs(
-    title = "Auto-ETS Forecast vs Actuals",
-    subtitle = "ETS model for monthly global temperature anomalies",
-    x = "Year",
-    y = "Temperature Anomaly (°C)"
-    )
-
-```
-
-The ETS(A,N,A) output highlights that although global temperatures fluctuate month to month, the underlying seasonal rhythm has stayed remarkably consistent across the historical record. The model assigns almost no seasonal updating (γ ≈ 0), indicating that warming is happening **in the level of the series rather than in the seasonal structure**.
-
-```{r}
 #| label: ets-forecast-zoom
 #| echo: true
 #| fig-cap: "Auto-ETS forecast vs actuals (2020–2025)."
@@ -310,11 +308,7 @@ y = "Temperature Anomaly (°C)"
 
 ```
 
-***Seems redundant to plot this twice? would it be better to just plot it once using the zoomed in version? And filter by 2010 so we get some of the pre-forecast observations***
-
-The ETS model anticipates a fairly stable temperature anomaly level, yet the actual data reveal stronger warming spikes that repeatedly push toward the top of the prediction bands. This mismatch shows how rapidly recent warming is occurring relative to historical seasonal patterns captured by the model.
-
-***Might be good to comment on how wide the prediction intervals are too***
+The ETS model anticipates a relatively stable anomaly level, but the actual values frequently climb toward the upper edge of the 80% and even 95% prediction intervals. This pattern indicates that recent warming spikes are occurring faster and more intensely than the model expects based on historical structure. When observations consistently press against the top of the interval bands, it suggests the model may be underestimating both the trend strength and the volatility of contemporary climate behavior.
 
 ## Temperature Modeling
 
@@ -377,7 +371,8 @@ ets_fit |>
   select(box_cox_auto) |> 
   report()
 ```
-All versions of ETS performed well on the training data with box_cox_auto performing the best.  Auto selection chose an additive model with a damped trend.  Looking the parameters, the `alpha` parameter values ranged from .2812 to .4469.  This shows that the level is fairly stable and perhaps indicates that the recent warming trend is being masked by the long tail of relatively stable temperatures.  This idea is bolstered by the the really small, almost 0 values of the `beta` parameter which indicates a stable trend.  The `gamma` parameters are all very small as showing, suggesting that the ETS models are correctly reading that the seasonal pattern is relatively stable.
+
+All versions of ETS performed well on the training data with box_cox_auto performing the best. Auto selection chose an additive model with a damped trend. Looking the parameters, the `alpha` parameter values ranged from .2812 to .4469. This shows that the level is fairly stable and perhaps indicates that the recent warming trend is being masked by the long tail of relatively stable temperatures. This idea is bolstered by the the really small, almost 0 values of the `beta` parameter which indicates a stable trend. The `gamma` parameters are all very small as showing, suggesting that the ETS models are correctly reading that the seasonal pattern is relatively stable.
 
 ```{r ets-forecasts}
 
@@ -403,7 +398,8 @@ ets_fc |>
   facet_grid(.model ~ .id) +
   theme_minimal()
 ```
-Visualizing the top 3 models illustrates how ETS models do just fine at predicting the fall and spring months, but consistently undershoot the seasonal peaks and exhibit wide prediction intervals around those areas.  ETS models have trouble capturing the increasing trend
+
+Visualizing the top 3 models illustrates how ETS models do just fine at predicting the fall and spring months, but consistently undershoot the seasonal peaks and exhibit wide prediction intervals around those areas. ETS models have trouble capturing the increasing trend
 
 ```{r ets-residuals}
 
@@ -413,7 +409,7 @@ ets_fit |>
   ggtime::gg_tsresiduals()
 ```
 
-Using box cox and checking the residuals of the model fitted on the most data, the residuals show a mostly normal distribution.  Slight skew to the right.  There are autocorrelations at lag 3 and lag 24.  We can confirm that the residuals aren't white noise with a Ljung-Box test.  There are certainly factors that influence temperature that ETS isn't capturing
+Using box cox and checking the residuals of the model fitted on the most data, the residuals show a mostly normal distribution. Slight skew to the right. There are autocorrelations at lag 3 and lag 24. We can confirm that the residuals aren't white noise with a Ljung-Box test. There are certainly factors that influence temperature that ETS isn't capturing
 
 ```{r ljung-box-ets}
 ets_fit |> 
@@ -422,7 +418,6 @@ ets_fit |>
   features(.innov, ljung_box, lag = 24) |> 
   summarize(across(.cols = lb_pvalue, .fns = mean))
 ```
-
 
 ### TSLM
 
@@ -456,7 +451,8 @@ tslm_fit |>
   tail(n = 1) |> 
   report()
 ```
-The trend_season, box_cox and piecewise models all perform the same on the training data.  Looking at the model report for the trend_season model we can see that all parameters are highly significant
+
+The trend_season, box_cox and piecewise models all perform the same on the training data. Looking at the model report for the trend_season model we can see that all parameters are highly significant
 
 ```{r tslm-forecasts}
 #| warning: false
@@ -483,6 +479,7 @@ tslm_fc |>
   facet_grid(.model ~ .id) +
   theme_minimal()
 ```
+
 It's pretty clear from the visuals that TSLM models are failing even harder than the ETS models at capturing the warming trend.
 
 ### ARIMA
@@ -525,7 +522,8 @@ arima_fit |>
   select(arima_auto) |> 
   report()
 ```
-Surprisingly the ARIMA models only selected a seasonal differencing instead of  both a seasonal and non-seasonal. 1 non-seasonal AR component was selected and 1 seasonal moving average.  So the auto selected models are using the previous observation and the previous seasons forecast error to make its predictions.
+
+Surprisingly the ARIMA models only selected a seasonal differencing instead of both a seasonal and non-seasonal. 1 non-seasonal AR component was selected and 1 seasonal moving average. So the auto selected models are using the previous observation and the previous seasons forecast error to make its predictions.
 
 ```{r arima-forecasts}
 #| warning: false
@@ -540,6 +538,7 @@ arima_fc |>
   arrange(RMSE) |> 
   kable(digits = 4)
 ```
+
 Arima log does best on the validation data
 
 ```{r arima-diagnostics}
@@ -550,6 +549,7 @@ arima_fc |>
   facet_wrap(~ .model, ncol = 1) +
   theme_minimal()
 ```
+
 We see that the ARIMA log model does slightly better at capturing the peaks than the other two, but all still don't quite capture the increasing trend
 
 ```{r arima-residuals}
@@ -568,7 +568,7 @@ arima_fit |>
   features(.innov, ljung_box, lag = 24)
 ```
 
-Residuals aren't even close to stationary.  With ARIMA we can experiment with other parameter values
+Residuals aren't even close to stationary. With ARIMA we can experiment with other parameter values
 
 ```{r arima-round-two}
 arima_fit <- trn_data |> 
@@ -589,6 +589,7 @@ arima_fc |>
   arrange(RMSE) |> 
   kable(digits = 4)
 ```
+
 Adding non-seasonal differencing, another AR term and a seasonal MA term to deal with the autocorrelation at lag 24 helped improved model results on the validation data
 
 ```{r ljung-box-arima-2}
@@ -597,6 +598,7 @@ arima_fit |>
   filter(.model == "arima_custom") |> 
   features(.innov, ljung_box, lag = 24)
 ```
+
 A high p-value tells us that the residuals are now resembling white noise
 
 ### Compare Best Models
@@ -630,16 +632,17 @@ compare_fc |>
   theme_minimal()
 ```
 
-The metrics based on RMSE show that ARIMA does slightly better than ETA and both do much better than TSLM.  Comparing ARIMA to ETS visually, we see much more uncertainty in the ETS predictions.  Both models still seem to under shoot the peaks which is a strong indicator that other factors are at play that will need to be considered
-
+The metrics based on RMSE show that ARIMA does slightly better than ETA and both do much better than TSLM. Comparing ARIMA to ETS visually, we see much more uncertainty in the ETS predictions. Both models still seem to under shoot the peaks which is a strong indicator that other factors are at play that will need to be considered
 
 ### TSLM External Predictors
 
 How far back accurate monthly data is available for the following predictors varies.  However for the main drivers of temperature, GHG's, the most accurate monthly estimates began in 1958.  So that will be the cutoff date for our training data.
 
-**Need references here** According to ______ the main factors that influence temperature are GHG's, weather patterns, and solar irradiance.  To see which ones best serve our purpose, we can model the following and compare performance
+According to the Intergovernmental Panel on Climate Change (IPCC, 2021), the main factors that influence global temperature are greenhouse gas concentrations, natural weather and ocean-atmosphere patterns, and variations in solar irradiance. To see which drivers best serve our forecasting purpose, we can model these factors individually and compare their predictive performance. Intergovernmental Panel on Climate Change (IPCC). *Climate Change 2021: The Physical Science Basis.*\
 
-TSI: 
+<https://www.ipcc.ch/report/ar6/wg1/>
+
+TSI:
 
 ENSO Index:
 
@@ -653,7 +656,6 @@ CH4:
 
 N2O:
 
-
 ```{r regressor-data}
 
 predictor_modeling <- read_rds("data/lagged_external_predictors.rds")
@@ -663,7 +665,7 @@ The earliest data that could be found on historical el nino/la nina events dated
 
 **Here go into detail about interpolating and lags**
 
-There are over 100 total combinations of external predictors, so instead of trying all of them, a handful of complementary ones are tested and reviewed to see if any other combinations are worth exploring.  For example, current co2_ppm combined with la_nina and el_nino events are compared against the same but with a 10yr lag on the co2_ppm variable.  If the lagged version of this model performs better, then lagged trends are worth looking further into
+There are over 100 total combinations of external predictors, so instead of trying all of them, a handful of complementary ones are tested and reviewed to see if any other combinations are worth exploring. For example, current co2_ppm combined with la_nina and el_nino events are compared against the same but with a 10yr lag on the co2_ppm variable. If the lagged version of this model performs better, then lagged trends are worth looking further into
 
 ```{r modeling-with-el_nino}
 #| message: false
@@ -698,15 +700,9 @@ tslm_regressor_fit <- cv_trn |>
     tslm_co2_nino_lag = TSLM(actual_temp ~ trend() + season() + el_nino + la_nina + co2_lag1)
   )
 
-tslm_regressor_fit |> 
-  accuracy() |> 
-  group_by(.model) |>
-  summarise(across(.cols = c(RMSE, MAE, MAPE), .fns = mean)) |> 
-  arrange(RMSE) |> 
-  kable(digits = 4)
 ```
-Training metrics show that adding predictors improve model results over baseline.  This could be due to overfitting
 
+Training metrics show that adding predictors improve model results over baseline. This could be due to overfitting
 
 ```{r check-model-report}
 
