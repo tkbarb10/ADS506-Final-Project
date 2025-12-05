@@ -695,7 +695,7 @@ tslm_regressor_fit <- cv_trn |>
     tslm_nino = TSLM(actual_temp ~ trend() + season() + el_nino + la_nina),
     tslm_enso = TSLM(actual_temp ~ trend() + season() + ENSO),
     tslm_enso_smooth = TSLM(actual_temp ~ trend() + season() + enso_smooth_12),
-    tslm_co2_nino_lag = TSLM(actual_temp ~ trend() + season() + el_nino + la_nina + co2_lag10)
+    tslm_co2_nino_lag = TSLM(actual_temp ~ trend() + season() + el_nino + la_nina + co2_lag1)
   )
 
 tslm_regressor_fit |> 
@@ -735,13 +735,13 @@ TSLM with a box_cox transformation and all of the predictors performed the best 
 ```{r tslm-round-two}
 tslm_second_fit <- cv_trn |> 
   model(
-    tslm_all_lag_box = TSLM(box_cox(actual_temp, lambda = 1.5) ~ trend() + season() + el_nino + la_nina + co2_lag10 + n2o_lag10 + ch4_lag10),
+    tslm_all_lag_box = TSLM(box_cox(actual_temp, lambda = 1.5) ~ trend() + season() + el_nino + la_nina + co2_lag1 + n2o_lag3 + ch4_lag3),
     tslm_nino_five_lag = TSLM(actual_temp ~ trend() + season() + el_nino + la_nina + co2_lag5),
-    tslm_enso_co2_lag = TSLM(actual_temp ~ trend() + season() + ENSO + co2_lag10),
-    tslm_enso_smooth_lag_all = TSLM(actual_temp ~ trend() + season() + enso_smooth_12 + co2_lag10 + n2o_lag10 + ch4_lag10),
-    tslm_all_lag = TSLM(actual_temp ~ trend() + season() + el_nino + la_nina + co2_lag10 + n2o_lag10 + ch4_lag10),
-    tslm_nino_50_lag = TSLM(box_cox(actual_temp, lambda = 1.5) ~ trend() + season() + el_nino + la_nina + co2_lag50),
-    tslm_enso_smooth_lag = TSLM(box_cox(actual_temp, lambda = 1.5) ~ trend() + season() + enso_smooth_6 + co2_lag50)
+    tslm_enso_co2_lag = TSLM(actual_temp ~ trend() + season() + ENSO + co2_lag1),
+    tslm_enso_smooth_lag_all = TSLM(actual_temp ~ trend() + season() + enso_smooth_12 + co2_lag1 + n2o_lag3 + ch4_lag3),
+    tslm_all_lag = TSLM(actual_temp ~ trend() + season() + el_nino + la_nina + co2_lag1 + n2o_lag3 + ch4_lag3),
+    tslm_nino_10_lag = TSLM(box_cox(actual_temp, lambda = 1.5) ~ trend() + season() + el_nino + la_nina + co2_lag10),
+    tslm_enso_smooth_lag = TSLM(box_cox(actual_temp, lambda = 1.5) ~ trend() + season() + enso_smooth_6 + co2_lag10)
   )
 
 tslm_second_fc <- tslm_second_fit |> 
@@ -755,7 +755,7 @@ tslm_second_fc |>
   kable(digits = 4)
 ```
 
-The target variable undergoing a box_cox transformation using the smoothed enso index over 6 months and a 50 year lag in CO2 concentration performs the best out of all the models by a fair margin
+The target variable undergoing a box_cox transformation using the smoothed enso index over 6 months and a 10 year lag in CO2 concentration performs the best out of all the models by a fair margin
 
 ```{r round-two-report}
 tslm_second_fit |> 
@@ -763,15 +763,15 @@ tslm_second_fit |>
   tail(n = 1) |> 
   report()
 ```
-And we can see from the report that all the predictors used are significant except trend.  It could be that smoothing out the enso index and the 50 yr lag of co2_ppm captures most of the trend component
+And we can see from the report that all the predictors used are significant except trend.  It could be that smoothing out the enso index and the 10 yr lag of co2_ppm captures most of the trend component
 
 ```{r tslm-best-model}
 tslm_best_fit <- cv_trn |> 
   model(
-    tslm_enso_6 = TSLM(box_cox(actual_temp, lambda = 1.5) ~ trend() + season() + enso_smooth_6 + co2_lag50),
-    tslm_enso_12 = TSLM(box_cox(actual_temp, lambda = 1.5) ~ trend() + season() + enso_smooth_12 + co2_lag50),
-    tslm_no_trend = TSLM(box_cox(actual_temp, lambda = 1.5) ~ season() + enso_smooth_12 + co2_lag50),
-    tslm_volcanic = TSLM(box_cox(actual_temp, lambda = 1.5) ~ season() + enso_smooth_12 + co2_lag50 + volcano_forcing)
+    tslm_enso_6 = TSLM(box_cox(actual_temp, lambda = 1.5) ~ trend() + season() + enso_smooth_6 + co2_lag10),
+    tslm_enso_12 = TSLM(box_cox(actual_temp, lambda = 1.5) ~ trend() + season() + enso_smooth_12 + co2_lag10),
+    tslm_no_trend = TSLM(box_cox(actual_temp, lambda = 1.5) ~ season() + enso_smooth_12 + co2_lag10),
+    tslm_volcanic = TSLM(box_cox(actual_temp, lambda = 1.5) ~ season() + enso_smooth_12 + co2_lag10 + volcano_forcing)
   )
 
 tslm_best_fc <- tslm_best_fit |> 
@@ -797,9 +797,9 @@ tslm_best_fit |>
 tslm_fc |>
   bind_rows(tslm_second_fc) |> 
   bind_rows(tslm_best_fc) |> 
-  filter(.id %in% c(5, 6), .model %in% c("tslm_no_trend", "tslm_enso_smooth_lag", "tslm_nino_50_lag", "tslm_co2_nino_lag", "tslm_box_cox")) |> 
+  filter(.id %in% c(4, 5), .model %in% c("tslm_no_trend", "tslm_enso_smooth_lag", "tslm_nino_50_lag", "tslm_co2_nino_lag", "tslm_box_cox")) |> 
   autoplot() + 
-  autolayer(predictor_modeling |> filter(year(Date) >= 2010), actual_temp) + 
+  autolayer(predictor_modeling |> filter(year(Date) >= 2015), actual_temp) + 
   facet_grid(.model ~ .id) + 
   theme_minimal()
 ```
@@ -839,14 +839,14 @@ arima_fit <- arima_trn |>
     arima_box = ARIMA(box_cox(actual_temp, lambda = 1.5) ~ co2_ppm + PDQ(D=1)),
     arima_log = ARIMA(log(actual_temp) ~ co2_ppm + PDQ(D=1)),
     arima_all = ARIMA(actual_temp ~ co2_ppm + ch4_ppb + n2o_ppb + TSI + el_nino + la_nina + volcano_linear + PDQ(D=1)),
-    arima_lag_ten = ARIMA(actual_temp ~ co2_lag10 + PDQ(D=1)),
-    arima_lag_ten_nino = ARIMA(actual_temp ~ co2_lag10 + el_nino + la_nina + PDQ(D=1)),
+    arima_lag_ten = ARIMA(actual_temp ~ co2_lag1 + PDQ(D=1)),
+    arima_lag_ten_nino = ARIMA(actual_temp ~ co2_lag1 + el_nino + la_nina + PDQ(D=1)),
     arima_enso = ARIMA(actual_temp ~ ENSO + PDQ(D=1)),
     arima_enso_smooth = ARIMA(actual_temp ~ enso_smooth_6 + PDQ(D=1)),
     arima_emissions = ARIMA(actual_temp ~ aggregate_emissions + PDQ(D=1)),
     arima_forcing = ARIMA(log(actual_temp) ~ rf_co2 + PDQ(D=1)),
     arima_enso_delay = ARIMA(actual_temp ~ enso_delay + PDQ(D=1)),
-    arima_lag_30 = ARIMA(actual_temp ~ co2_lag30 + PDQ(D=1)),
+    arima_lag_3 = ARIMA(actual_temp ~ co2_lag3 + PDQ(D=1)),
     arima_physics_robust = ARIMA(log(actual_temp) ~ rf_co2 + volcano_linear + enso_delay + PDQ(D=1)),
     arima_volcano_basic = ARIMA(log(actual_temp) ~ ENSO + co2_ppm + volcano_forcing + PDQ(D = 1))
   )
@@ -871,7 +871,7 @@ arima_fc |>
   arrange(RMSE) |> 
   kable(digits = 4)
 ```
-The arima_physics_robust model is the best overall by any metric.  the other best models by AICc are middle of the pack on the validation metrics **include a more robust explanation of why a delay in the enso index and why co2 radiative forcing on it's own aren't strong signals**
+The model including features for volcanic activity and non-lagged variables for CO2 and ENSO is the best overall by any metric.  **include a more robust explanation of why a delay in the enso index and why co2 radiative forcing on it's own aren't strong signals**
 
 ```{r initial-arima-report}
 #| message: false
@@ -879,15 +879,15 @@ The arima_physics_robust model is the best overall by any metric.  the other bes
 
 # spot check models
 arima_fit |> 
-  select(arima_physics_robust) |> 
+  select(arima_volcano_basic) |> 
   report()
 
 arima_fit |> 
-  select(arima_physics_robust) |>
+  select(arima_volcano_basic) |>
   ggtime::gg_tsresiduals(plot_type = "partial")
 ```
 
-The arima_physics_robust model selected AR(2), MA(1) and sAR(2) with a seasonal difference.  The ACF and PACF plots still contain spikes at lag 24.  Interestingly, arima_enso and arima_enso_smooth don't have autocorrelation spikes at lag 24, only at lag 3.  Maybe some combination of those with rf_co2 or co2 would be worth exploring
+The arima_volcano_basic model selected AR(1), MA(1) and sMA(2) with a seasonal difference.  The ACF and PACF plots still contain spikes at lag 3. Interestingly, the arima_physics robust model contains a spike at lag 24 but not 3.  There might be something in delaying the El Nino effect by a few months that explains the autocorrelation
 
 ```{r arima-param-check}
 
@@ -908,17 +908,17 @@ Now we'll check the best models from above as well as a few other promising pred
 arima_second_fit <- cv_trn |> 
   model(
     arima_enso_log_co2 = ARIMA(log(actual_temp) ~ ENSO + co2_ppm + PDQ(D = 1)),
-    arima_auto_50 = ARIMA(log(actual_temp) ~ ENSO + co2_lag50 + PDQ(D = 1)),
+    arima_auto_10 = ARIMA(log(actual_temp) ~ ENSO + co2_lag10 + PDQ(D = 1)),
     arima_physics_robust = ARIMA(log(actual_temp) ~ rf_co2 + volcano_linear + enso_delay + PDQ(D = 1)),
     arima_forcing = ARIMA(log(actual_temp) ~ rf_co2 + enso_smooth_6 + PDQ(D = 1)),
-    arima_auto_50_enso_6 = ARIMA(log(actual_temp) ~ enso_smooth_6 + co2_lag50 + PDQ(D = 1)),
+    arima_auto_10_enso_6 = ARIMA(log(actual_temp) ~ enso_smooth_6 + co2_lag10 + PDQ(D = 1)),
     arima_robust_enso_6 = ARIMA(log(actual_temp) ~ rf_co2 + volcano_linear + enso_smooth_6 + PDQ(D = 1)), 
-    arima_co2_50_volcano = ARIMA(log(actual_temp) ~ co2_lag50 + volcano_linear + PDQ(D = 1)),
-    arima_co2_30_nino = ARIMA(actual_temp ~ co2_lag30 + el_nino + la_nina + PDQ(D = 1)),
-    arima_co2_30_nino_tsi = ARIMA(actual_temp ~ co2_lag30 + el_nino + la_nina + TSI + PDQ(D = 1)),
+    arima_co2_10_volcano = ARIMA(log(actual_temp) ~ co2_lag10 + volcano_linear + PDQ(D = 1)),
+    arima_co2_3_nino = ARIMA(actual_temp ~ co2_lag3 + el_nino + la_nina + PDQ(D = 1)),
+    arima_co2_3_nino_tsi = ARIMA(actual_temp ~ co2_lag3 + el_nino + la_nina + TSI + PDQ(D = 1)),
     arima_physics_robust_decay = ARIMA(log(actual_temp) ~ rf_co2 + volcano_forcing + enso_delay + PDQ(D = 1)),
     arima_physics_robust_decay_enso_3 = ARIMA(log(actual_temp) ~ rf_co2 + volcano_forcing + enso_smooth_3 + PDQ(D = 1)),
-    arima_lag_30_enso = ARIMA(log(actual_temp) ~ co2_lag30 + ENSO + PDQ(D=1)),
+    arima_lag_3_enso = ARIMA(log(actual_temp) ~ co2_lag3 + ENSO + PDQ(D=1)),
     arima_physics_enso_3 = ARIMA(log(actual_temp) ~ rf_co2 + enso_smooth_3 + PDQ(D=1))
   )
 
@@ -936,7 +936,7 @@ arima_second_fc |>
 
 ```
 
-Across multiple folds, the arima model utilizing the radiative forcing of CO2, volcanic activity and a 3 month smoothing of the enso index performs the best on most metrics other than MPE and ME.
+Across multiple folds, the forcing models and models that smooth out the enso index and/or utilize a lagged CO2 concentration variable perform the best.  All the results are fairly close and would probably trade places over different subsets of the data so choosing the best one will require consideration of other factors
 
 ```{r arima-glance}
 
@@ -948,31 +948,29 @@ arima_second_fit |>
   arrange(AICc)
 ```
 
-The radiative forcing model was also the best model in terms of AICc.  It's also clear that a log transformation is necessary for this data to smooth out the variation in temperature.
-
-Since the CO2 radiative forcing model performed best by RMSE on the validation data and it was the best model by AICc standards, that might be the best model to choose
+The top model by AICc was second best metric wise.  It's also clear from the bottom models that a log transformation of the response variable drastically improves the models
 
 ```{r residual-check}
 
 arima_second_fit |> 
-  select(arima_auto_50) |>
+  select(arima_physics_robust_decay_enso_3) |>
   tail(n = 1) |> 
   ggtime::gg_tsresiduals(plot_type = "partial")
 
 arima_second_fit |> 
-  select(arima_auto_50) |> 
+  select(arima_physics_robust_decay_enso_3) |> 
   tail(n = 1) |> 
   augment() |> 
   features(.innov, ljung_box, lag = 24)
 
 ```
 
-No autocorrelation spikes in the residuals and the Ljung-Box test confirms that the residuals resemble white noise for the arima_auto_50 model
+No autocorrelation spikes in the residuals and the Ljung-Box test confirms that the residuals resemble white noise for the arima_physics_robust_decay_enso_3 model.  Most other models have a spike at lag 3 or lag 24.  The only other top model without any autocorrelation is arima_physics_enso_3 so a 3 month smoothing of the ENSO index seems to take care of it
 
 ```{r arima_cv_visual}
 
-arima_fc |>
-  filter(.id %in% c(5, 6), .model %in% c("arima_auto_50", "arima_enso_log_co2", "arima_auto_50_enso_6", "arima_physics_robust")) |> 
+arima_second_fc |>
+  filter(.id %in% c(4, 5), .model %in% c("arima_physics_robust_decay_enso_3", "arima_enso_log_co2", "arima_auto_10_enso_6")) |> 
   autoplot() +
   autolayer(predictor_modeling |> filter(year(Date) >= 2015), actual_temp) +
   facet_wrap(~ .model, ncol = 1) +
@@ -997,10 +995,10 @@ final_fit <- cv_trn |>
     ets_auto = ETS(actual_temp),
     ets_additive = ETS(actual_temp ~ error("A") + trend("A") + season("A")),
     ets_box_auto = ETS(box_cox(actual_temp, lambda = 1.5)),
-    tslm_no_trend = TSLM(box_cox(actual_temp, lambda = 1.5) ~ season() + enso_smooth_12 + co2_lag50),
-    tslm_volcanic = TSLM(box_cox(actual_temp, lambda = 1.5) ~ season() + enso_smooth_12 + co2_lag50 + volcano_forcing),
-    tslm_enso_smooth_lag = TSLM(box_cox(actual_temp, lambda = 1.5) ~ trend() + season() + enso_smooth_6 + co2_lag50),
-    arima_auto_50 = ARIMA(log(actual_temp) ~ ENSO + co2_lag50 + PDQ(D = 1)),
+    tslm_no_trend = TSLM(box_cox(actual_temp, lambda = 1.5) ~ season() + enso_smooth_12 + co2_lag10),
+    tslm_volcanic = TSLM(box_cox(actual_temp, lambda = 1.5) ~ season() + enso_smooth_12 + co2_lag10 + volcano_forcing),
+    tslm_enso_smooth_lag = TSLM(box_cox(actual_temp, lambda = 1.5) ~ trend() + season() + enso_smooth_6 + co2_lag10),
+    arima_auto_10 = ARIMA(log(actual_temp) ~ ENSO + co2_lag10 + PDQ(D = 1)),
     arima_physics_robust_decay_enso_3 = ARIMA(log(actual_temp) ~ rf_co2 + volcano_forcing + enso_smooth_3 + PDQ(D = 1)),
     arima_physics_enso_3 = ARIMA(log(actual_temp) ~ rf_co2 + enso_smooth_3 + PDQ(D = 1)),
     arima_enso_log_co2 = ARIMA(log(actual_temp) ~ ENSO + co2_ppm + PDQ(D = 1)),
@@ -1017,6 +1015,8 @@ final_fc |>
   arrange(RMSE) |> 
   kable(digits = 4)
 ```
+
+
 ```{r final-residuals}
 
 final_fit |> 
@@ -1025,7 +1025,7 @@ final_fit |>
   ggtime::gg_tsresiduals(plot_type = "partial")
 
 final_fit |> 
-  select(arima_physics_enso_3) |> 
+  select(arima_auto_10) |> 
   augment() |> 
   features(.innov, ljung_box, lag = 24)
 ```
@@ -1034,7 +1034,7 @@ final_fit |>
 ```{r final-visual}
 
 final_fc |>
-  filter(.id %in% c(4, 5), .model %in% c("tslm_no_trend", "arima_physics_enso_3", "ets_additive")) |> 
+  filter(.id %in% c(4, 5), .model %in% c("tslm_no_trend", "arima_physics_robust_decay_enso_3", "ets_additive")) |> 
   autoplot() +
   autolayer(predictor_modeling |> filter(year(Date) >= 2015), actual_temp) +
   facet_wrap(~ .model, ncol = 1) +
@@ -1042,7 +1042,26 @@ final_fc |>
 ```
 
 ```{r scenario-forecasting}
+# for the enso index, the average across the whole data set is 0.0470
 
+low_enso <- predictor_modeling |> 
+  select(ENSO) |> 
+  slice_tail(n = 600)
+# 0.0158
+
+high_enso <- predictor_modeling |> 
+  select(ENSO) |> 
+  slice_head(n = 600) 
+
+# 0.0997
+
+normal_enso <- predictor_modeling |> 
+  select(ENSO) |> 
+  slice(650:1250)
+
+# 0.0469
+# 
+# Then would need smoothed versions of these
 
 
 ```
