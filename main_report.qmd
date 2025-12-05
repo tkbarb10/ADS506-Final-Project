@@ -79,7 +79,7 @@ climate_raw <- read_csv(
 )
 ```
 
-```{r kamran-raw-data-overview}
+```{r kamran-raw-data-clean}
 climate_ts <- climate_raw %>%
   mutate(date = yearmonth(paste(Year, Month, sep = "-"))) %>%
   as_tsibble(index = date) %>%
@@ -91,28 +91,15 @@ glimpse(climate_raw)
 names(climate_raw)
 ```
 
-This dataset contains 2,109 monthly observations from 1850–2024, with global temperature anomalies and uncertainties, where **Monthly_Anomaly** is the primary usable series and most multi-year anomaly fields contain NA values except at the end of their smoothing windows.
+This dataset contains 2,109 monthly observations from 1850–2025, with global temperature anomalies and uncertainties, where **Monthly_Anomaly** is the primary usable series and most multi-year anomaly fields contain NA values except at the end of their smoothing windows.
 
 ***Do we want to add a visual here of the time series? Otherwise it's not really clear that there are year-to-year fluctuations or that the LOWESS-smoothed line clarifies the upward trend (I deleted it out)***
 
-```{r kamran-rename}
-climate_clean <- climate_raw |>
-  janitor::clean_names() |>
-  rename(
-    no_smoothing  = monthly_anomaly,
-    lowess_5      = five_year_anomaly
-  )
-```
-
-```{r kamran-data-overview-rename}
-glimpse(climate_clean)
-names(climate_clean)
-```
 
 ```{r kamran-convert-ts}
-climate_ts <- climate_clean |>
+climate_ts <- climate_raw |>
   mutate(
-    date = yearmonth(paste(year, month, sep = "-"))
+    date = yearmonth(paste(Year, Month, sep = "-"))
   ) |>
   as_tsibble(index = date)
 
@@ -123,9 +110,9 @@ The 1880s exhibit consistently negative temperature anomalies, with both raw and
 
 ```{r kamran-visualize-ts}
 climate_ts |>
-  autoplot(no_smoothing) +
+  autoplot(Monthly_Anomaly) +
   labs(
-    title = "Annual Global Temperature Anomalies (No Smoothing)",
+    title = "Annual Global Temperature Anomalies",
     x = "Year",
     y = "Temperature Anomaly (°C, relative to 1951–1980)"
   ) +
@@ -138,7 +125,7 @@ Temperatures fluctuate annually but show a clear upward trend, with modern anoma
 ```{r kamran-decomp}
 climate_stl <- climate_ts |>
   model(
-    STL(no_smoothing ~ trend(window = 15))
+    STL(Monthly_Anomaly ~ trend(window = 15))
   ) |>
   components()
 
@@ -152,25 +139,10 @@ autoplot(climate_stl) +
 
 The STL results highlight how the underlying warming signal has grown stronger over time, while the remainder shows noisy but relatively modest deviations from the trend. This reinforces that annual variability exists but is dwarfed by the long-term increase in global temperatures.
 
-```{r kamran-load-monthly}
-
-gistemp_annual <- gistemp_monthly_raw |>
-  rename(raw = land_ocean_temperature_index_c) |>
-  separate(
-    raw,
-    into = c("year", "no_smoothing", "lowess_5"),
-    sep = ","
-  ) |>
-  slice(-1) |>  # drop the header row "Year,No_Smoothing,Lowess(5)"
-  mutate(across(everything(), as.numeric))
-
-glimpse(gistemp_annual)
-```
-
 ```{r kamran-acf}
 #| warning: false
 climate_ts |>
-  gg_tsdisplay(no_smoothing, plot_type = "partial") +
+  gg_tsdisplay(Monthly_Anomaly, plot_type = "partial") +
   labs(
     title = "Annual Temperature Anomalies: Time Plot, ACF, and PACF"
   )
@@ -181,7 +153,7 @@ The climate series exhibits a persistent warming trend, and the ACF’s slow dec
 ```{r kamran-stationary-checks}
 # KPSS
 climate_ts |>
-  features(no_smoothing, unitroot_kpss)
+  features(Monthly_Anomaly, unitroot_kpss)
 ```
 
 The KPSS test confirms what the plots already suggest: the anomaly series isn’t stationary, with the low p-value indicating that the warming trend dominates over random fluctuations.
@@ -190,21 +162,20 @@ The KPSS test confirms what the plots already suggest: the anomaly series isn’
 #| warning: false
 # Non-seasonal differencing needed?
 climate_ts |>
-  features(no_smoothing, unitroot_ndiffs)
+  features(Monthly_Anomaly, unitroot_ndiffs)
 
 climate_ts |>
-  features(no_smoothing, guerrero)
+  features(Monthly_Anomaly, guerrero)
 ```
 
 λ ≈ 1.16 → little to no Box–Cox transformation needed; variance is already stable. Unitroot test suggests differencing may be needed
 
 ```{r eda-global-anomalies}
-#| label: data-gistemp
 #| echo: true
 #| message: false
 #| warning: false
 
-temp_ts <- df|>
+temp_ts <- climate_ts|>
   mutate(
     Month = yearmonth(paste(Year, Month, sep = "-"))
   )|>
@@ -291,6 +262,9 @@ report(fit_ets)
 #| label: ets-forecast-zoom
 #| echo: true
 #| fig-cap: "Auto-ETS forecast vs actuals (2020–2025)."
+
+fc_ets <- fit_ets |> 
+  forecast(new_data = test)
 
 fc_ets_zoom <- fc_ets|>
 filter_index("2020 Jan" ~ "2025 Dec")
@@ -816,7 +790,7 @@ The biggest issue is that there is significant autocorrelation in the residuals,
 
 Using a non-cv split initially to speed up fit time
 
-```{r arima-data}
+```{r arima-data-regressors}
 
 arima_trn <- predictor_modeling |>
   filter(year(Date) > 1957) |> 
