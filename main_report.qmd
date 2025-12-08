@@ -13,7 +13,6 @@ library(tidyverse)
 library(knitr)
 library(gt)
 library(urca)
-library(janitor)
 ```
 
 # Introduction
@@ -1127,4 +1126,363 @@ scenario_forecasting <- function(growth_rate, years, enso_level) {
   return(temperature_forecast)
 }
 
+```
+
+# External Predictor Feature Engineering Steps
+
+```{r co2-emissions}
+
+ice_core <- read_csv("data/raw_data/annual_co2_icecore.csv")
+
+loa_df <- read_csv("data/raw_data/mauna_loa_co2.csv")
+
+ice_core |> 
+  filter(year(`CO2 Date`) > 1849, year(`CO2 Date`) <= 1955) |> 
+  add_row(
+    `CO2 Date` = as.Date("1956-01-01"),
+    `CO2 ppm` = 313
+  ) |> 
+  add_row(
+    `CO2 Date` = as.Date("1957-01-01"),
+    `CO2 ppm` = 313
+  )
+
+
+co2_ts <- ice_core |> 
+  mutate(
+    Year = year(`CO2 Date`),
+    Month = list(1:12)
+  ) |> 
+  unnest(Month) |> 
+  mutate(
+    Date = as.Date(glue::glue("{Year}-{Month}-01")),
+    Date = yearmonth(Date)
+  ) |> 
+  select(c(Date, `CO2 PPM`)) |> 
+  filter(year(Date) > 1849, year(Date) < 1958) |>
+  as_tsibble() |> 
+  fill_gaps(.start = yearmonth("1850-01"), .end = yearmonth('1958-02')) |> 
+  fill(`CO2 PPM`, .direction = "down")
+
+
+loa_ts <- loa_df |> 
+  mutate(
+    Date = as.Date(glue::glue("{year}-{month}-01")),
+    Date = yearmonth(Date)
+  ) |> 
+  rename(`CO2 PPM` = average) |> 
+  select(Date, `CO2 PPM`) |> 
+  as_tibble()
+
+co2_ppm <- bind_rows(co2_ts, loa_ts)
+```
+
+The annual data for ice core co2 was cut between 1850 and February 1958, then fill gaps was used to create NA rows for monthly data in between years, then the NA values were filled in with the most recent known observation. This data was then joined with the known observations from Mauna Loa
+
+```{r co2-emissions}
+# Annual CO2
+
+annual_co2 <- read_csv("data/raw_data/annual_co2_emissions.csv")
+
+co2_land_use <- read_csv("data/raw_data/annual_co2_land_use_emissions.csv")
+
+# Monthly CO2
+
+monthly_co2 <- read_rds("data/raw_data/global_monthly_emissions_1970_2024.rds")
+
+monthly_co2_bio <- read_rds("data/raw_data/global_monthly_emissions_landuse_1970_2024.rds")
+
+month_co2 <- monthly_co2 |> 
+  select(c(Year:Dec)) |> 
+  group_by(Year) |> 
+  summarize(across(.cols = c(Jan:Dec), .fns = sum)) |> 
+  pivot_longer(cols = c(Jan:Dec), names_to = 'Month', values_to = "CO2_Emissions") |> 
+  mutate(
+    date_string = paste(Year, Month, "01", sep = "-"),
+    Date = yearmonth(date_string)
+  ) |> 
+  select(c(Date, CO2_Emissions))
+
+month_co2_bio <- monthly_co2_bio |> 
+  select(c(Year:Dec)) |> 
+  group_by(Year) |> 
+  summarize(across(.cols = c(Jan:Dec), .fns = sum)) |> 
+  pivot_longer(cols = c(Jan:Dec), names_to = 'Month', values_to = "CO2_Bio_Emissions") |> 
+  mutate(
+    date_string = paste(Year, Month, "01", sep = "-"),
+    Date = yearmonth(date_string)
+  ) |> 
+  select(c(Date, CO2_Bio_Emissions))
+
+combined_monthly <- month_co2 |> 
+  left_join(month_co2_bio)
+
+final_monthly <- combined_monthly |> 
+  mutate(Total_CO2 = CO2_Bio_Emissions + CO2_Emissions) |> 
+  select(c(Date, Total_CO2))
+
+
+annual_convert <- annual_co2 |> 
+  filter(Year < 1970) |> 
+  uncount(12, .id = "Month") |> 
+  mutate(
+    Date = make_yearmonth(year = Year, month = Month),
+    monthly_co2 = (World * 3664) / 12
+  ) |> 
+  select(Date, monthly_co2) |> 
+  as_tsibble(index = Date)
+
+annual_bio_convert <- co2_land_use |> 
+  filter(Year <= 1969) |> 
+  uncount(12, .id = "Month") |> 
+  mutate(
+    Date = make_yearmonth(year = Year, month = Month),
+    monthly_bio_co2 = (Average * 3664) / 12
+  ) |> 
+  select(Date, monthly_bio_co2) |> 
+  as_tsibble(index = Date)
+
+
+combined_monthly_convert <- annual_convert |> 
+  left_join(annual_bio_convert)
+
+earlier_co2_data <- combined_monthly_convert |> 
+  mutate(Total_CO2 = (monthly_bio_co2 + monthly_co2)) |> 
+  select(c(Date, Total_CO2))
+
+```
+
+Monthly CO2 emission estimates from 1970 - 2024 were combined with annual emissions dating back to 1850.  The annual estimates were in million tons of carbon, while the monthly estimates were in gigagrams of CO2, which is equal to 1000 metric tons.  First, to convert the annual estimates to gigagrams, the values need to be multiplied by 3.664 to convert carbon to CO2 weight, then multiplied by 1000 to convert to gigagrams
+
+
+```{r combining-predictors}
+
+global_temps <- read_csv("data/converted_global_temp.csv")
+
+tsi <- read_rds("data/raw_data/monthly_tsi.rds")
+
+ch4 <- read_rds("data/raw_data/annual_ch4.rds")
+
+
+full_ch4 <- ch4 |> 
+  filter(year(`CH4 Date`) >= 1849) |> 
+  mutate(Date = yearmonth(`CH4 Date`)) |> 
+  rename(ch4 = `CH4 Value`) |> 
+  select(Date, ch4) |> 
+  as_tsibble() |> 
+  fill_gaps(.start = yearmonth("1850-01"), .end = yearmonth('2025-09')) |> 
+  fill(ch4, .direction = "down")
+
+full_tsi <- tsi |> 
+  mutate(Date = yearmonth(time)) |> 
+  select(Date, TSI) |> 
+  as_tsibble() |> 
+  fill_gaps(.start = yearmonth("1850-01"), .end = yearmonth('2025-09')) |> 
+  fill(TSI, .direction = "updown")
+
+
+co2_ts <- co2_ppm |>
+  mutate(Date = yearmonth(Date)) |> 
+  rename(co2_ppm = `CO2 PPM`) |> 
+  select(Date, co2_ppm) |> 
+  as_tsibble()
+
+full_reg <- global_temps |> 
+  select(Date, actual_temp) |> 
+  mutate(Date = yearmonth(Date)) |> 
+  as_tsibble() |> 
+  left_join(earlier_co2_data, by = 'Date') |> 
+  left_join(full_ch4, by = "Date") |> 
+  left_join(full_tsi, by = "Date") |> 
+  left_join(co2_ts, by = "Date")
+```
+
+The annual data for ch4 was cutoff from 1850.  Fill gaps can create NA rows for monthly
+data in between years, then the NA's can be fill in with the most recent known observation.  
+
+The TSI data extends from 1874 to 2023 so a similar process can be used to extend it from 1850 to Sept 2025.
+
+```{r enso-index}
+
+new_df <- read_rds("data/raw_data/enso_index.rds")
+
+row_index <- which(new_df$Year == 2024)
+
+if (length(row_index) == 1) {
+  new_df[row_index, "MAR"] <- 1.13
+  new_df[row_index, "APR"] <- 0.77
+  new_df[row_index, "MAY"] <- 0.23
+  new_df[row_index, "JUN"] <- 0.17
+  new_df[row_index, "JUL"] <- 0.04
+  new_df[row_index, "AUG"] <- -0.12
+  new_df[row_index, "SEP"] <- -0.26
+  new_df[row_index, "OCT"] <- -0.27
+  new_df[row_index, "NOV"] <- -0.25
+  new_df[row_index, "DEC"] <- -0.60
+}
+
+new_df_long <- new_df |>
+  pivot_longer(
+    cols = c(JAN:DEC),
+    names_to = "Month",
+    values_to = "ENSO"
+  ) |>
+  mutate(
+    Date_String = glue::glue("{Year}-{Month}-01"),
+    Date = yearmonth(as.Date(Date_String, format = "%Y-%b-%d"))
+  ) |>
+  select(Date, ENSO) |> 
+  as_tsibble()
+
+new_df_long <- new_df_long |> 
+  select(-enso_smooth) |> 
+  mutate(
+    enso_smooth_12 = slider::slide_dbl(ENSO, mean, .before = 11, complete = TRUE),
+    enso_smooth_6 = slider::slide_dbl(ENSO, mean, .before = 5, complete = TRUE),
+    enso_smooth_3 = slider::slide_dbl(ENSO, mean, .before = 2, complete = TRUE),
+    enso_delay = lag(enso_smooth_3, 4),
+    rf_co2 = 5.35 * log(co2_ppm / 278)
+  )
+```
+
+The enso index data from the Ensemble ONI websites most recent observation is February of 2024.  NOAA has the most up to date values so a vector of up to date values was used to fill in the rest of the year.  Then 3, 6 and 12 month smoothed versions of the index were created to reduce the effect of noise.  Then a delayed version of the index was created by using a 4-month lag on the 3 month smoothed index.
+
+The radiative forcing metric of CO2 was evaluated by taking the log transformation of the CO2 concentration divided by the pre-industrial baseline then multiplied by 5.35.  This is a simplified version of the more complex IPCC formula.
+
+```{r interpolating-ghgs}
+
+library(zoo)
+
+# CO2 data
+
+mauna_loa <- read_csv("data/raw_data/mauna_loa_co2.csv")
+icecore <- read_csv("data/raw_data/annual_co2_icecore.csv")
+
+# Annual estimates
+n2o <- read_csv("data/raw_data/n2o_annual.csv")
+ch4 <- read_csv("data/raw_data/ch4_annual.csv")
+
+# Monthly estimates
+mauna_n20 <- read_csv("data/raw_data/n2o_monthly.csv")
+mauna_ch4 <- read_csv("data/raw_data/ch4_monthly.csv")
+
+# Convert to tsibble
+loa_ts <- mauna_loa |> 
+  mutate(
+    Date = make_yearmonth(year = year, month = month)
+  ) |> 
+  rename(co2_ppm = average) |> 
+  select(Date, co2_ppm) |> 
+  as_tsibble()
+
+# Average seasonal component for known observations
+seasonal_trend <- mauna_loa |> 
+  mutate(
+    Date = make_yearmonth(year = year, month = month)
+    ) |> 
+  select(Date, average) |> 
+  as_tsibble() |> 
+  model(STL()) |> 
+  components() |> 
+  as_tibble() |> 
+  group_by(month(Date)) |> 
+  summarise(co2_season = mean(season_year)) |> 
+  rename(month = `month(Date)`)
+
+# Regress and interpolate annual estimates up until most recent known monthly observation
+full_ts <- icecore |> 
+  mutate(
+    Date = yearmonth(`CO2 Date`)
+  ) |> 
+  rename(co2 = `CO2 PPM`) |> 
+  select(Date, co2) |> 
+  complete(Date = seq(min(Date), max(Date), by = 1)) |> 
+  filter(between(year(Date), 1850, 1957)) |> 
+  complete(Date = seq(min(Date), yearmonth("1958-02"), by = 1)) |> 
+  as_tsibble() |> 
+  mutate(
+    co2_ppm = na.spline(co2)
+  ) |> 
+  mutate(month = month(Date)) |> 
+  left_join(seasonal_trend, by = "month") |> 
+  mutate(
+    scale_factor = co2_ppm / mean(mauna_loa$average),
+    final_co2 = co2_ppm + (co2_season * scale_factor)
+  ) |> 
+  select(Date, final_co2) |> 
+  rename(co2_ppm = final_co2) |> 
+  bind_rows(loa_ts)
+```
+
+```{r volcanic-data}
+
+new_df <- new_df |> 
+  select(-enso_smooth) |> 
+  mutate(
+    enso_smooth_12 = slider::slide_dbl(ENSO, mean, .before = 11, complete = TRUE),
+    enso_smooth_6 = slider::slide_dbl(ENSO, mean, .before = 5, complete = TRUE),
+    enso_smooth_3 = slider::slide_dbl(ENSO, mean, .before = 2, complete = TRUE),
+    enso_delay = lag(enso_smooth_3, 4),
+    rf_co2 = 5.35 * log(co2_ppm / 278)
+  )
+
+df <- read_tsv("C:/Users/tkbar/Downloads/volcano-events-2025-12-03_09-46-47_-0800.tsv")
+
+volcano <- df |> 
+  select(Year, Mo, Name, VEI) |> 
+  drop_na() |> 
+  filter(VEI > 0) |> 
+  mutate(
+    Date = make_yearmonth(year = Year, month = Mo),
+    
+  ) |> 
+  select(Date, VEI)
+
+df |> 
+  filter(Year == 2022)
+
+
+# 1. CLEAN THE VOLCANO DATA
+# Filter out small events (VEI < 4). 
+# CRITICAL NOTE: If your data includes 2022, you might want to manually exclude 
+# Hunga Tonga here to avoid predicting cooling that didn't happen.
+volcano_clean <- volcano %>%
+  filter(VEI >= 4)
+
+# 2. DEFINE THE EXPONENTIAL DECAY FUNCTION
+calculate_decay <- function(current_date, eruption_table, decay_months = 36, tau = 12) {
+  
+  # Ensure dates are proper Date objects
+  curr_d <- as.Date(current_date)
+  erup_d <- as.Date(eruption_table$Date)
+  
+  # Window Start (Look back 3 years)
+  window_start <- curr_d - months(decay_months)
+  
+  # Find active eruptions (occurred within the last 36 months)
+  active_indices <- which(erup_d <= curr_d & erup_d > window_start)
+  
+  if (length(active_indices) == 0) {
+    return(0)
+  }
+  
+  # Calculate time elapsed in months
+  # We use the interval operator %--% from lubridate
+  time_span <- lubridate::interval(erup_d[active_indices], curr_d)
+  months_elapsed <- time_span %/% months(1)
+  
+  # --- THE FIX: EXPONENTIAL DECAY FORMULA ---
+  # Formula: Strength = Peak * e^(-t / tau)
+  # At t=0, strength is 1. At t=12, strength is 0.36. At t=36, strength is 0.04.
+  strengths <- exp(-months_elapsed / tau)
+  
+  # Sum them up (in case multiple volcanoes overlap)
+  return(sum(strengths))
+}
+
+# 3. APPLY TO TSIBBLE
+climate_tsibble_updated <- lagged %>%
+  mutate(
+    volcano_forcing = map_dbl(Date, calculate_decay, eruption_table = volcano_clean)
+  )
 ```
