@@ -5,6 +5,9 @@ date: "2025-11-14"
 format:
   pdf:
     toc: true
+knitrs:
+  opts_chunk:
+    cache: true
 ---
 
 ```{r setup, include=FALSE, echo=FALSE, message=FALSE, warning=FALSE}
@@ -1130,7 +1133,8 @@ scenario_forecasting <- function(growth_rate, years, enso_level) {
 
 # External Predictor Feature Engineering Steps
 
-```{r co2-emissions}
+```{r co2-emissions-fe}
+#| eval: false
 
 ice_core <- read_csv("data/raw_data/annual_co2_icecore.csv")
 
@@ -1180,6 +1184,8 @@ co2_ppm <- bind_rows(co2_ts, loa_ts)
 The annual data for ice core co2 was cut between 1850 and February 1958, then fill gaps was used to create NA rows for monthly data in between years, then the NA values were filled in with the most recent known observation. This data was then joined with the known observations from Mauna Loa
 
 ```{r co2-emissions}
+#| eval: false
+
 # Annual CO2
 
 annual_co2 <- read_csv("data/raw_data/annual_co2_emissions.csv")
@@ -1256,6 +1262,7 @@ Monthly CO2 emission estimates from 1970 - 2024 were combined with annual emissi
 
 
 ```{r combining-predictors}
+#| eval: false
 
 global_temps <- read_csv("data/converted_global_temp.csv")
 
@@ -1303,6 +1310,7 @@ data in between years, then the NA's can be fill in with the most recent known o
 The TSI data extends from 1874 to 2023 so a similar process can be used to extend it from 1850 to Sept 2025.
 
 ```{r enso-index}
+#| eval: false
 
 new_df <- read_rds("data/raw_data/enso_index.rds")
 
@@ -1350,6 +1358,7 @@ The enso index data from the Ensemble ONI websites most recent observation is Fe
 The radiative forcing metric of CO2 was evaluated by taking the log transformation of the CO2 concentration divided by the pre-industrial baseline then multiplied by 5.35.  This is a simplified version of the more complex IPCC formula.
 
 ```{r interpolating-ghgs}
+#| eval: false
 
 library(zoo)
 
@@ -1415,6 +1424,7 @@ full_ts <- icecore |>
 ```
 
 ```{r volcanic-data}
+#| eval: false
 
 new_df <- new_df |> 
   select(-enso_smooth) |> 
