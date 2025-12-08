@@ -10,19 +10,6 @@ Arima ppm model
 1.251 * 3.664 
 ("Land use contribution in Gt")
 
-Best models initially
-
- compare_fit <- cv_trn |> 
-  model(
-    ets = ETS(actual_temp ~ error("A") + trend("A") + season("A")),
-    tslm = TSLM(log(actual_temp) ~ trend() + season()),
-    arima = ARIMA(actual_temp ~ 0 + pdq(3, 1, 2) + PDQ(1, 1, 2))
-  )
- 
-This one is probably the best ARIMA model generally
-
- Model: ARIMA(1,0,0)(0,1,1)[12] w/ drift 
-Transformation: box_cox(actual_temp, lambda = 1.5) 
 
 "General notes for arima
 - some sort of lag with co2
@@ -31,3 +18,10 @@ Transformation: box_cox(actual_temp, lambda = 1.5)
 - seasonal diff
 - no non-seasonal diff
 "
+
+
+# ------ Next Steps ------- #
+
+- more advanced modeling with XGBoost and NNETAR
+- Modeling uncertainty with current setup by generating different pathways for co2_ppm, computing the xregs for each .rep, modeling, then get quantiles (gpt thread)
+- Use bagging to train models on different versions of the data

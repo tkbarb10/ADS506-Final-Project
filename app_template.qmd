@@ -21,10 +21,7 @@ modeling_data <- read_rds("data/lagged_nino_predictors.rds")
 country_2024_baseline <- read_rds("country_2024_baseline_Gt.rds")
 ```
 
-
-
 ## Tab 1: Explore
-
 
 ```{r - time-series}
 #CO2 emissions time series
@@ -93,11 +90,11 @@ actual_temps |>
 
 # Tab 2: Impact and Scenario Forecasting
 
-
 ## Forecasting model parameters to calculate the users impact
-- temp goes up by 0.0109 C for every unit increase co2_ppm
 
-- ppm goes up by 0.0585 for every Gigaton of CO2 emitted
+-   temp goes up by 0.0109 C for every unit increase co2_ppm
+
+-   ppm goes up by 0.0585 for every Gigaton of CO2 emitted
 
 ```{r - scenario-planning}
 
@@ -201,21 +198,3 @@ ggplot() +
        x = "Year") +
   theme_minimal()
 ```
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
