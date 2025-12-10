@@ -11,7 +11,7 @@ library(here)
 # Load data AS IS (preserving yearmonth index)
 time_series <- read_rds(here("data/time_series_visual.rds"))
 actual_temps <- read_rds(here("data/converted_global_temp.rds"))
-modeling_data <- read_rds(here("data/lagged_nino_predictors.rds"))
+modeling_data <- read_rds(here("data/lagged_external_predictors.rds"))
 
 # --- 2. PRE-COMPUTATION (Models & Baseline) ---
 

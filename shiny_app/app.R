@@ -22,7 +22,7 @@ GLOBAL_MONTHLY_GG <- (GLOBAL_ANNUAL_GT * 1e6) / 12
 # --- 2. DATA LOADING ---
 time_series <- read_rds(here("data/time_series_visual.rds"))
 actual_temps <- read_rds(here("data/converted_global_temp.rds"))
-modeling_data <- read_rds(here("data/lagged_nino_predictors.rds"))
+modeling_data <- read_rds(here("data/lagged_external_predictors.rds"))
 
 # Load and Pivot Country Data
 country_baseline <- tryCatch({
@@ -55,7 +55,7 @@ ppm_model <- modeling_data |>
   )
 
 # --- Pre-calculate Standard Baseline ---
-last_hist_row <- modeling_data |> filter(!is.na(Total_CO2)) |> tail(1)
+last_hist_row <- modeling_data |> tail(1)
 start_date <- last_hist_row$Date
 base_stock <- last_hist_row$aggregate_emissions
 
