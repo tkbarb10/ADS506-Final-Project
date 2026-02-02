@@ -2,8 +2,10 @@
 appendix_cache/*
 appendix_files/*
 appendix.pdf
-"Lit review draft.docx"
 notes
+.Rprofile
+.Rhistory
+ADS506-Final-Project.Rproj
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
